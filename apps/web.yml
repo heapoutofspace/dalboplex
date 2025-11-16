@@ -1,0 +1,162 @@
+version: '3.7'
+services:
+  # Modern reverse proxy and load balancer
+  # https://doc.traefik.io/traefik/
+  traefik:
+    image: traefik:v3.5
+    command:
+      # API and dashboard
+      - --api.dashboard=true
+      - --api.insecure=false
+
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.endpoint=http://dockerproxy:2375
+      - --providers.docker.network=apps
+      - --providers.docker.exposedbydefault=false
+
+      # Entrypoints
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.api.address=:8080
+
+      # TLS configuration with DNS challenge for wildcard certs
+      - --certificatesresolvers.letsencrypt.acme.email=simon@ceilingcat.ch
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudns
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.propagation.delayBeforeChecks=60
+#      - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+
+      # Logging
+      - --log.level=INFO
+      - --accesslog=true
+
+    ports:
+      - 9080:80
+      - 9443:443
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - @letsencrypt
+
+    environment:
+      - CLOUDNS_SUB_AUTH_ID=$CLOUDNS_AUTH_USER
+      - CLOUDNS_AUTH_PASSWORD=$CLOUDNS_AUTH_PASSWORD
+      - LEGO_DISABLE_CNAME_SUPPORT=true
+
+    x-features:
+      - domain:
+          subdomain: traefik
+          service: api@internal
+      - proxy:
+          subdomain: truenas
+          target: http://host.docker.internal:80
+      - homepage:
+          group: System
+          description: Secure web proxy
+          weight: 40
+      - widget:
+          url: http://traefik:8080
+    labels:
+      - traefik.http.routers.traefik-api.rule=Host(`traefik`)
+      - traefik.http.routers.traefik-api.service=api@internal
+      - traefik.http.routers.traefik-api.entrypoints=api
+
+
+  # OAuth2/OIDC authentication proxy
+  # https://oauth2-proxy.github.io/oauth2-proxy/
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.12.0
+    command:
+      - --http-address=0.0.0.0:4180
+      - --reverse-proxy=true
+
+      - --provider=keycloak-oidc
+      - --provider-display-name=ceilingcat
+      - --client-id=dalboplex
+      - --client-secret=$OAUTH2_CLIENT_SECRET
+      - --oidc-issuer-url=https://login.ceilingcat.ch/auth/realms/master
+      - --redirect-url=https://login.dalboplex.ch/oauth2/callback
+
+      - --scope=openid email profile groups
+      - --oidc-extra-audience=account
+      - --oidc-email-claim=email
+      - --oidc-groups-claim=groups
+
+      - --allowed-group=dalboplex
+      - --email-domain=*
+      - --trusted-ip=172.16.0.0/16
+
+      - --session-store-type=cookie
+      - --cookie-name=_auth
+      - --cookie-secret=$OAUTH2_COOKIE_SECRET
+      - --cookie-secure=true
+      - --cookie-domain=.dalboplex.ch
+      - --cookie-samesite=lax
+      - --cookie-expire=24h
+
+      - --whitelist-domain=.dalboplex.ch
+      - --upstream=static://202
+      - --skip-provider-button=true
+
+      - --set-xauthrequest=true
+      - --prefer-email-to-user=false
+
+      - --standard-logging=true
+      - --auth-logging=true
+
+    x-features:
+      - domain:
+          subdomain: login
+          port: 4180
+          public: true
+    labels:
+      # OAuth2 middleware for Traefik
+      - traefik.http.middlewares.oauth2-proxy.forwardauth.address=http://oauth2-proxy:4180
+      - traefik.http.middlewares.oauth2-proxy.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.oauth2-proxy.forwardauth.authResponseHeaders=X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups,X-Auth-Request-Preferred-Username,X-Auth-Request-Access-Token,X-Forwarded-User
+
+
+  # Customizable application dashboard
+  # https://gethomepage.dev/
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=admin.dalboplex.ch
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - @config:/app/config
+    x-features:
+      - domain:
+          subdomain: admin
+          port: 3000
+
+
+  # Public-facing application dashboard
+  # https://gethomepage.dev/
+  homepage-public:
+    image: ghcr.io/gethomepage/homepage:latest
+    environment:
+      - HOMEPAGE_ALLOWED_HOSTS=dalboplex.ch
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - @config:/app/config
+      - @media:/media:ro
+    x-features:
+      - domain:
+          subdomain: '@'
+          port: 3000
+          public: true
+
+
+#  whoami:
+#    image: traefik/whoami:latest
+#    labels:
+#      - @domain(whoami.dalboplex.ch)

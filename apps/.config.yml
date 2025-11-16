@@ -1,0 +1,153 @@
+common:
+  container:
+    environment:
+      - TZ=Europe/Zurich
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+    networks:
+      apps: null
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "250m"
+
+  compose:
+    networks:
+      apps:
+        external: true
+
+volumes:
+  default:
+    host: /mnt/nvme/apps/{{ container }}/{{ folder }}
+    mount: /{{ folder }}
+    uid: 1000
+    gid: 1000
+    mode: 775
+  docker:
+    host: /var/run/docker.sock
+    mount: /var/run/docker.sock:ro
+  media:
+    host: /mnt/hdd/media
+    mount: /media
+  downloads:
+    host: /mnt/scratch/downloads
+    mount: /downloads
+
+labels:
+  domain:
+    args:
+      - subdomain
+    defaults:
+      port: 80
+      public: false
+    template: |
+      - traefik.enable=true
+      - traefik.http.routers.{{ container }}.rule=Host(`{% if subdomain != '@' %}{{ subdomain }}.{% endif %}dalboplex.ch`)
+      - traefik.http.routers.{{ container }}.service={{ service or container }}
+      - @_tls({{ container }})
+      {% if not public %}- traefik.http.routers.{{ container }}.middlewares=oauth2-proxy{% endif %}
+      {% if not service %}- traefik.http.services.{{ container }}.loadbalancer.server.port={{ port }}{% endif %}
+      - @_redirect({{ subdomain }}, alias={{ container }}{% if alias %}, custom_alias={{ alias }}{% endif %})
+
+  proxy:
+    args:
+      - subdomain
+      - target
+    template: |
+      - traefik.enable=true
+      - traefik.http.routers.{{ subdomain }}.rule=Host(`{{ subdomain }}.dalboplex.ch`)
+      - traefik.http.routers.{{ subdomain }}.service={{ subdomain }}
+      - @_tls({{ subdomain }})
+      {% if not public %}- traefik.http.routers.{{ subdomain }}.middlewares=oauth2-proxy{% endif %}
+      - traefik.http.services.{{ subdomain }}.loadbalancer.server.url={{ target }}
+      - @_redirect({{ subdomain }}{% if alias %}, alias={{ alias }}{% endif %})
+
+  _tls:
+    args:
+      - router
+    template: |
+      - traefik.http.routers.{{ router }}.entrypoints=websecure
+      - traefik.http.routers.{{ router }}.tls.certresolver=letsencrypt
+      - traefik.http.routers.{{ router }}.tls.domains[0].main=dalboplex.ch
+      - traefik.http.routers.{{ router }}.tls.domains[0].sans=*.dalboplex.ch, dplx.ch, *.dplx.ch
+
+  _redirect:
+    args:
+      - subdomain
+    template: |
+      {% if subdomain == '@' %}
+        {% set router = 'redirect_root' %}
+      {% else %}
+        {% set router = 'redirect_' + subdomain %}
+      {% endif %}
+      
+      - traefik.http.routers.{{ router }}.rule=Host(`{% if subdomain != '@' %}{{ subdomain }}.{% endif %}dplx.ch`)
+      {%- if alias and alias != subdomain -%}
+        {{ ' ' }}|| Host(`{{ alias }}.dplx.ch`) || Host(`{{ alias }}.dalboplex.ch`)
+      {%- endif %}
+      {%- if custom_alias and custom_alias != subdomain and custom_alias != alias -%}
+        {{ ' ' }}|| Host(`{{ custom_alias }}.dplx.ch`) || Host(`{{ custom_alias }}.dalboplex.ch`)
+      {%- endif %}
+      - @_tls({{ router }})
+      - traefik.http.routers.{{ router }}.service=noop@internal
+      - traefik.http.routers.{{ router }}.middlewares={{ router }}
+      - traefik.http.middlewares.{{ router }}.redirectregex.regex=https://[^/]+/(.*)
+      - traefik.http.middlewares.{{ router }}.redirectregex.replacement=https://{% if subdomain != '@' %}{{ subdomain }}.{% endif %}dalboplex.ch/$${1}
+
+  homepage:
+    args:
+      - group
+      - description
+    defaults:
+      weight: 5
+      instance: private
+    template: |
+      - homepage.instance.{{ instance }}.group={{ group }}
+      - homepage.instance.{{ instance }}.name={{ name or container|capitalize }}
+      - homepage.instance.{{ instance }}.description={{ description }}
+      - homepage.instance.{{ instance }}.weight={{ weight }}
+      - homepage.instance.{{ instance }}.icon={{ icon or container }}
+      - homepage.instance.{{ instance }}.href=
+        {%- if href -%}
+          {{ href }}
+        {%- else -%}
+          https://{{ subdomain or domain.subdomain }}.dalboplex.ch/
+        {%- endif %}
+
+  widget:
+    template: |
+      {% set instance = instance or homepage.instance or 'private' %}
+      {% set widget = 'widget' %} 
+      {% if not type %}- homepage.instance.{{ instance }}.{{ widget }}.type={{ container }}{% endif %}
+      {% if not url %}- homepage.instance.{{ instance }}.{{ widget }}.url=http://{{ container }}{% if domain.port != 80 %}:{{ domain.port }}{% endif %}{% endif %}
+      
+      {% for key, value in kwargs.items() %}
+        {% if key == 'fields' %}
+      - homepage.instance.{{ instance }}.{{ widget }}.fields=[{% for field in value.split('|') %}"{{ field }}"{% if not loop.last %},{% endif %}{% endfor %}]
+        {% else %}
+      - homepage.instance.{{ instance }}.{{ widget }}.{{ key }}={{ value }}
+        {% endif %}
+      {% endfor %}
+
+  widget-prometheus:
+    args:
+      - metrics
+    defaults:
+      instance: private
+      url: http://prometheus:9090
+    template: |
+      - homepage.instance.{{ instance }}.widget.type=prometheusmetric
+      - homepage.instance.{{ instance }}.widget.url={{ url }}
+      {%- macro render_dict(prefix, obj) %}
+        {%- for key, value in obj.items() %}
+          {%- if value is mapping %}
+      {{ render_dict(prefix ~ '.' ~ key, value) }}
+          {%- else %}
+      - {{ prefix }}.{{ key }}={{ value }}
+          {%- endif %}
+        {%- endfor %}
+      {%- endmacro %}
+      {%- for metric in metrics %}
+      {{ render_dict('homepage.instance.%s.widget.metrics[%i]' % (instance, loop.index0), metric) }}
+      {%- endfor %}

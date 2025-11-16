@@ -1,0 +1,188 @@
+version: '3.7'
+services:
+  # Metrics collection and time-series database
+  # https://prometheus.io/
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    user: 1000:1000
+    command:
+      - --config.file=/config/prometheus.yml
+      - --storage.tsdb.path=/data
+      - --storage.tsdb.retention.time=90d
+#      - --web.console.libraries=/usr/share/prometheus/console_libraries
+#      - --web.console.templates=/etc/prometheus/consoles
+      - --web.external-url=https://prometheus.dalboplex.ch
+#      - --web.config.file=/etc/prometheus/prometheus-web.yml"
+    volumes:
+      - @data
+      - @config
+    x-features:
+      - domain:
+          subdomain: prometheus
+          port: 9090
+      - homepage:
+          group: Monitoring
+          description: Metrics aggregation
+      - widget:
+
+  # Hard drive and SSD monitoring
+  # https://github.com/AnalogJ/scrutiny
+  scrutiny:
+    image: ghcr.io/analogj/scrutiny:master-omnibus
+    environment:
+      - COLLECTOR_CRON_SCHEDULE=17 1 * * *
+    volumes:
+      - @config:/opt/scrutiny/config
+      - @data:/opt/scrutiny/influxdb
+      - /run/udev:/run/udev:ro
+    devices:
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+      - /dev/sdg
+      - /dev/sdh
+      - /dev/sdi
+      - /dev/sdj
+      - /dev/nvme0
+      - /dev/nvme1
+      - /dev/nvme2
+      - /dev/nvme3
+    cap_add:
+      - SYS_RAWIO
+      - SYS_ADMIN
+    x-features:
+      - domain:
+          subdomain: scrutiny
+          port: 8080
+      - homepage:
+          group: Monitoring
+          description: Disk health monitoring
+          weight: 20
+      - widget:
+
+  # Internet connection monitoring and testing
+  # https://docs.speedtest-tracker.dev/
+  speedtest:
+    image: lscr.io/linuxserver/speedtest-tracker:latest
+    environment:
+      - APP_KEY=$SPEEDTEST_APP_KEY
+      - DB_CONNECTION=sqlite
+      - APP_URL=https://speedtest.dalboplex.ch
+      - ASSET_URL=https://speedtest.dalboplex.ch
+      - DISPLAY_TIMEZONE=Europe/Zurich
+      - SPEEDTEST_SCHEDULE=33 */2 * * *
+      - SPEEDTEST_SERVERS=3188,50092,54457
+      - PUBLIC_DASHBOARD=true
+    volumes:
+      - @config
+    x-features:
+      - domain: speedtest
+      - homepage:
+          group: Monitoring
+          description: Internet speed monitoring
+          icon: speedtest-tracker
+          weight: 30
+      - widget:
+          version: 2
+          key: $SPEEDTEST_API_KEY
+
+  # Cross-platform system monitoring with web interface
+  # https://nicolargo.github.io/glances/
+  glances:
+    image: nicolargo/glances:latest
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+      - DOCKER_HOST=tcp://dockerproxy:2375
+    volumes:
+      - @config:/etc/glances
+      - /etc/os-release:/etc/os-release:ro
+    devices:
+      - /dev/dri
+    x-features:
+      - domain:
+          subdomain: glances
+          port: 61208
+      - homepage:
+          group: Monitoring
+          description: Resource monitoring
+      - widget:
+          version: 4
+          metric: cpu
+
+  # Glances Prometheus exporter for metrics collection
+  # https://nicolargo.github.io/glances/
+  glances-export:
+    image: nicolargo/glances:latest-full
+    pid: host
+    environment:
+      - GLANCES_OPT=--export prometheus
+      - DOCKER_HOST=tcp://dockerproxy:2375
+    volumes:
+      - /mnt/nvme/apps/glances/config:/etc/glances:ro
+      - /etc/os-release:/etc/os-release:ro
+    devices:
+      - /dev/dri
+
+
+  # Lightweight server and container monitoring
+  # https://beszel.dev/
+  beszel:
+    image: henrygd/beszel
+    user: 1000:1000
+    environment:
+      - TRUSTED_AUTH_HEADER=X-Auth-Request-Email
+      - DISABLE_PASSWORD_AUTH=true
+      - APP_URL=https://beszel.dalboplex.ch
+    volumes:
+      - @hub:/beszel_data
+      - @socket:/beszel_socket
+    x-features:
+      - domain:
+          subdomain: beszel
+          port: 8090
+      - homepage:
+          group: Monitoring
+          description: Experimental alternative monitoring
+          weight: 40
+
+  # Beszel monitoring agent with hardware access
+  # https://beszel.dev/
+  beszel-agent:
+    image: henrygd/beszel-agent-intel:latest
+    cap_add:
+      - SYS_RAWIO # required for S.M.A.R.T. data
+      - SYS_ADMIN # required for NVMe S.M.A.R.T. data
+      - PERFMON
+    devices:
+      - /dev/dri
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+      - /dev/sdg
+      - /dev/sdh
+      - /dev/sdi
+      - /dev/sdj
+      - /dev/nvme0
+      - /dev/nvme1
+      - /dev/nvme2
+      - /dev/nvme3
+    environment:
+      - LISTEN=/beszel_socket/beszel.sock
+      - DOCKER_HOST=http://dockerproxy:2375
+      - HUB_URL=http://beszel:8090
+      - TOKEN=$BESZEL_AGENT_TOKEN
+      - KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB5AUWM87G4hDsO32CPhPXKdvQsagmMGME4Tz1ZHTzHt
+    volumes:
+      - /mnt/nvme/apps/beszel/agent:/var/lib/beszel-agent
+      - /mnt/nvme/apps/beszel/agent/socket:/beszel_socket
+
+      - /mnt/nvme/apps/beszel:/extra-filesystems/nvme:ro
+      - @media:/extra-filesystems/hdd:ro
+      - @downloads:/extra-filesystems/scratch:ro

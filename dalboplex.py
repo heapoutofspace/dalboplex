@@ -1,0 +1,1777 @@
+#!/usr/bin/env uv run
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pyyaml",
+#     "jinja2",
+#     "typer",
+#     "rich",
+#     "requests",
+#     "pillow",
+#     "truenas_api_client @ git+https://github.com/truenas/api_client.git",
+# ]
+# ///
+
+"""
+Docker Compose management tool with TrueNAS integration.
+
+Render docker-compose templates with boilerplate and path replacements,
+and manage custom apps on TrueNAS.
+"""
+
+import sys
+import yaml
+import typer
+import ssl
+import os
+import hashlib
+import shutil
+import difflib
+import re
+import json
+import requests
+from pathlib import Path
+from jinja2 import Template
+from typing import Any, Optional
+from collections import OrderedDict
+from rich.console import Console
+from rich.table import Table
+
+# Monkey-patch SSL to accept self-signed certificates
+import warnings
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+# Patch ssl.SSLContext.wrap_socket to disable verification
+_orig_SSLContext_wrap_socket = ssl.SSLContext.wrap_socket
+
+def _patched_SSLContext_wrap_socket(self, *args, **kwargs):
+    self.check_hostname = False
+    self.verify_mode = ssl.CERT_NONE
+    return _orig_SSLContext_wrap_socket(self, *args, **kwargs)
+
+ssl.SSLContext.wrap_socket = _patched_SSLContext_wrap_socket
+
+from truenas_api_client import Client
+
+app = typer.Typer(help="Docker Compose management tool with TrueNAS integration")
+console = Console()
+
+# Configuration file location
+CONFIG_DIR = Path.home() / ".config" / "dalboplex"
+TRUENAS_CONFIG_FILE = CONFIG_DIR / "truenas.yml"
+
+
+# Custom YAML representer to preserve order and formatting
+def represent_none(self, _):
+    return self.represent_scalar("tag:yaml.org,2002:null", "")
+
+
+yaml.add_representer(type(None), represent_none)
+
+
+# Custom YAML dumper that doesn't use aliases (anchors/references)
+class NoAliasDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
+
+
+def load_config(config_path: Path) -> dict[str, Any]:
+    """Load the render configuration file."""
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def load_state(state_path: Path) -> dict[str, Any]:
+    """Load the application state file."""
+    if not state_path.exists():
+        return {}
+
+    with open(state_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_state(state_path: Path, state: dict[str, Any]):
+    """Save the application state file."""
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(state_path, "w") as f:
+        yaml.dump(state, f, default_flow_style=False, sort_keys=True)
+
+
+def compute_config_hash(config_content: str) -> str:
+    """Compute SHA256 hash of the configuration content."""
+    return hashlib.sha256(config_content.encode('utf-8')).hexdigest()
+
+
+def show_diff(old_content: str, new_content: str, old_label: str = "installed", new_label: str = "rendered"):
+    """Display a unified diff between two content strings."""
+    from rich.syntax import Syntax
+
+    old_lines = old_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+
+    diff = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=old_label,
+        tofile=new_label,
+        lineterm=''
+    )
+
+    diff_text = ''.join(diff)
+
+    if diff_text:
+        syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
+        console.print("\n[bold]Configuration changes:[/bold]")
+        console.print(syntax)
+        console.print()
+    else:
+        console.print("[dim]No differences found[/dim]")
+
+
+def extract_default_volume_dirs(rendered_config: dict[str, Any], render_config: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Extract directories that use the default volume mapping from rendered config.
+    Returns a list of dicts with path, uid, gid, mode.
+    """
+    if "volumes" not in render_config or "default" not in render_config["volumes"]:
+        return []
+
+    default_config = render_config["volumes"]["default"]
+    if "uid" not in default_config or "gid" not in default_config or "mode" not in default_config:
+        return []
+
+    dirs_to_create = []
+    services = rendered_config.get("services", {})
+
+    for service_name, service_config in services.items():
+        volumes = service_config.get("volumes", [])
+        for volume in volumes:
+            if not isinstance(volume, str):
+                continue
+
+            # Parse the volume to extract host path
+            parts = volume.split(":")
+            if len(parts) < 2:
+                continue
+
+            host_path = parts[0]
+
+            # Check if this path matches the default pattern
+            # Pattern: /mnt/nvme/apps/<container>/<folder>
+            if host_path.startswith("/mnt/nvme/apps/"):
+                dirs_to_create.append({
+                    "path": host_path,
+                    "uid": default_config["uid"],
+                    "gid": default_config["gid"],
+                    "mode": str(default_config["mode"]),  # Convert to string for octal
+                })
+
+    return dirs_to_create
+
+
+def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
+    """
+    Ensure directories exist with correct permissions via TrueNAS API.
+    """
+    for dir_info in dirs:
+        path = dir_info["path"]
+        uid = dir_info["uid"]
+        gid = dir_info["gid"]
+        mode = dir_info["mode"]
+
+        # Check if path exists
+        try:
+            stat_result = client.call("filesystem.stat", path)
+            exists = True
+        except Exception:
+            exists = False
+
+        if not exists:
+            # Create directory - ensure parent exists first
+            console.print(f"[dim]Creating directory: {path}[/dim]")
+            try:
+                parent_path = str(Path(path).parent)
+
+                # Check if parent exists, create if needed
+                try:
+                    client.call("filesystem.stat", parent_path)
+                except Exception:
+                    # Parent doesn't exist, create it
+                    client.call("filesystem.mkdir", {"path": parent_path})
+
+                # Now create the actual directory
+                client.call("filesystem.mkdir", {"path": path})
+
+                # Set ownership
+                client.call("filesystem.chown", {
+                    "path": path,
+                    "uid": uid,
+                    "gid": gid,
+                    "options": {"recursive": False}
+                })
+
+                # Set permissions
+                client.call("filesystem.setperm", {
+                    "path": path,
+                    "mode": mode,
+                    "options": {"recursive": False, "traverse": False}
+                })
+                console.print(f"[green]✓[/green] Created {path} (uid={uid}, gid={gid}, mode={mode})")
+            except Exception as e:
+                console.print(f"[red]✗[/red] Failed to create {path}: {e}")
+                raise
+        else:
+            # Check and fix permissions if needed
+            current_uid = stat_result.get("uid")
+            current_gid = stat_result.get("gid")
+            current_mode = oct(stat_result.get("mode", 0))[-3:]  # Get last 3 digits
+
+            needs_chown = current_uid != uid or current_gid != gid
+            needs_chmod = current_mode != mode
+
+            if needs_chown or needs_chmod:
+                changes = []
+                if needs_chown:
+                    changes.append(f"ownership {current_uid}:{current_gid} → {uid}:{gid}")
+                if needs_chmod:
+                    changes.append(f"mode {current_mode} → {mode}")
+
+                console.print(f"[yellow]⚠[/yellow] Fixing {path}: {', '.join(changes)}")
+
+                try:
+                    if needs_chown:
+                        client.call("filesystem.chown", {
+                            "path": path,
+                            "uid": uid,
+                            "gid": gid,
+                            "options": {"recursive": False}
+                        })
+                    if needs_chmod:
+                        client.call("filesystem.setperm", {
+                            "path": path,
+                            "mode": mode,
+                            "options": {"recursive": False, "traverse": False}
+                        })
+                    console.print(f"[green]✓[/green] Fixed {path}")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to fix {path}: {e}")
+                    raise
+            else:
+                console.print(f"[green]✓[/green] {path}")
+
+
+def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, Any]) -> str:
+    """
+    Parse volume placeholder syntax like:
+    - @config -> uses default template with folder=config, mount=/config
+    - @config:/path -> uses default template with custom mount path
+    - @config.foldername -> uses default template with custom folder name
+    - @config.foldername:/path -> custom folder and mount path
+    - @docker -> uses specific docker mount if defined, otherwise uses default
+    - @media -> uses specific media mount if defined, otherwise uses default
+
+    Returns the rendered volume string.
+    """
+    if not volume.startswith("@"):
+        return volume
+
+    # Split off any options like :ro at the end
+    parts = volume.split(":")
+    placeholder = parts[0]
+    mount_opts = parts[2] if len(parts) > 2 else None
+
+    # Parse the placeholder @type.folder or @type
+    placeholder = placeholder[1:]  # Remove @
+    if "." in placeholder:
+        mount_type, folder = placeholder.split(".", 1)
+    else:
+        mount_type = placeholder
+        folder = None
+
+    # Get mount configuration
+    if "volumes" not in config:
+        raise ValueError("No 'volumes' section found in config")
+
+    # Check if specific mount type exists, otherwise use default
+    if mount_type in config["volumes"]:
+        mount_config = config["volumes"][mount_type]
+    elif "default" in config["volumes"]:
+        mount_config = config["volumes"]["default"]
+    else:
+        raise ValueError(f"Mount type '{mount_type}' not found and no 'default' template in config")
+
+    # Determine folder name
+    if folder is None:
+        # Default to mount type name
+        # e.g., @data -> folder="data", @data:/custom/path -> folder="data"
+        # To use a different folder name, use: @data.customfolder:/path
+        folder = mount_type
+
+    # Render host path using Jinja2
+    # Support both 'host' and 'host_path' keys for backwards compatibility
+    host_template_str = mount_config.get("host") or mount_config.get("host_path")
+    if not host_template_str:
+        raise ValueError(f"Mount config must have 'host' or 'host_path' key")
+
+    host_path_template = Template(host_template_str)
+    host_path = host_path_template.render(container=service_name, folder=folder)
+
+    # Determine mount path
+    if len(parts) > 1:
+        mount_path = parts[1]
+    else:
+        # Support both 'mount' and 'mount_path' keys for backwards compatibility
+        mount_path = mount_config.get("mount") or mount_config.get("mount_path")
+        if not mount_path:
+            raise ValueError(f"Mount config must have 'mount' or 'mount_path' key")
+
+        # Render mount path template if it contains variables
+        mount_path_template = Template(mount_path)
+        mount_path = mount_path_template.render(container=service_name, folder=folder)
+
+    # Build final volume string
+    result = f"{host_path}:{mount_path}"
+    if mount_opts:
+        result += f":{mount_opts}"
+
+    return result
+
+
+def parse_label_template_call(label: str) -> tuple[str | None, list[str], dict[str, str]]:
+    """
+    Parse a label template call like @domain(example.com, port=8080, public=true) or @widget
+    Returns: (template_name, positional_args, keyword_args)
+    Returns (None, [], {}) if not a template call
+    """
+    if not label.startswith("@"):
+        return None, [], {}
+
+    # Extract template name and arguments
+    import re
+    # Match @template_name or @template_name(args)
+    match = re.match(r'@(\w+)(?:\((.*)\))?$', label.strip())
+    if not match:
+        return None, [], {}
+
+    template_name = match.group(1)
+    args_str = match.group(2)
+
+    # If no parentheses or empty parentheses, return empty args
+    if not args_str:
+        return template_name, [], {}
+
+    # Parse arguments
+    positional_args = []
+    keyword_args = {}
+
+    # Split by comma, but respect nesting
+    args = []
+    current_arg = ""
+    paren_depth = 0
+
+    for char in args_str:
+        if char == ',' and paren_depth == 0:
+            args.append(current_arg.strip())
+            current_arg = ""
+        else:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            current_arg += char
+
+    if current_arg.strip():
+        args.append(current_arg.strip())
+
+    # Process each argument
+    for arg in args:
+        if '=' in arg:
+            key, value = arg.split('=', 1)
+            keyword_args[key.strip()] = value.strip()
+        else:
+            positional_args.append(arg.strip())
+
+    return template_name, positional_args, keyword_args
+
+
+def process_x_features(
+    x_features: list[dict[str, Any]] | None,
+    container_name: str,
+    config: dict[str, Any]
+) -> list[str]:
+    """
+    Process x-features structure and convert to label template calls.
+    Format: x-features is a list of dicts, each with a template name as key
+    and arguments as a nested dict.
+
+    Example (full syntax):
+      x-features:
+        - homepage:
+            category: Download
+            description: Archive extraction
+            weight: 35
+
+    Example (simple value syntax for single argument):
+      x-features:
+        - domain: files
+        - homepage:
+            category: Download
+            description: Archive extraction
+
+    For templates with a single positional argument, you can use the simple
+    value syntax (e.g., "domain: files" instead of "domain: {subdomain: files}").
+    All required arguments must be provided.
+    Templates can access context from previously rendered features.
+    """
+    if not x_features:
+        return []
+
+    label_templates = config.get("labels", {})
+    rendered_labels = []
+    previous_contexts = {}
+    template_counters = {}
+
+    for feature_item in x_features:
+        # Each item should be a dict with exactly one key (the template name)
+        if not isinstance(feature_item, dict):
+            console.print(f"[yellow]Warning:[/yellow] x-features item is not a dict: {feature_item}")
+            continue
+
+        if len(feature_item) != 1:
+            console.print(f"[yellow]Warning:[/yellow] x-features item should have exactly one key: {feature_item}")
+            continue
+
+        template_name = list(feature_item.keys())[0]
+        keyword_args_raw = feature_item[template_name]
+
+        # Look up template definition
+        if template_name not in label_templates:
+            console.print(f"[red]Error:[/red] Unknown label template in x-features: {template_name}")
+            raise typer.Exit(1)
+
+        template_def = label_templates[template_name]
+        template_args = template_def.get("args", [])
+        template_defaults = template_def.get("defaults", {})
+
+        # Handle simple value syntax for single positional argument
+        # e.g., "domain: files" instead of "domain: {subdomain: files}"
+        if keyword_args_raw is None:
+            # Empty widget (e.g., "- widget:" with no args)
+            keyword_args = {}
+        elif not isinstance(keyword_args_raw, dict):
+            # If there's exactly one required positional argument, use the simple value
+            if len(template_args) > 0:
+                first_arg = template_args[0]
+                keyword_args = {first_arg: keyword_args_raw}
+            else:
+                console.print(f"[yellow]Warning:[/yellow] Template '{template_name}' has no positional arguments but received simple value: {keyword_args_raw}")
+                continue
+        else:
+            keyword_args = keyword_args_raw
+
+        # Increment counter for this template
+        if template_name not in template_counters:
+            template_counters[template_name] = 0
+        template_counters[template_name] += 1
+
+        # Build context with base values
+        context = {
+            "container": container_name,
+            "index": template_counters[template_name],
+        }
+
+        # Add contexts from previous templates
+        for prev_template_name, prev_context in previous_contexts.items():
+            context[prev_template_name] = prev_context
+
+        # Build the current template's argument context
+        current_template_context = {}
+
+        # Apply defaults
+        for key, value in template_defaults.items():
+            context[key] = value
+            current_template_context[key] = value
+
+        # Check that all required arguments are provided
+        required_args = set(template_args) - set(template_defaults.keys())
+        provided_args = set(keyword_args.keys())
+        missing_args = required_args - provided_args
+
+        if missing_args:
+            console.print(f"[red]Error:[/red] Missing required arguments for '{template_name}' in container '{container_name}':")
+            console.print(f"  Required: {', '.join(sorted(required_args))}")
+            console.print(f"  Provided: {', '.join(sorted(provided_args))}")
+            console.print(f"  Missing: {', '.join(sorted(missing_args))}")
+            raise typer.Exit(1)
+
+        # Apply provided keyword arguments
+        for key, value in keyword_args.items():
+            # Parse boolean values
+            if isinstance(value, str):
+                if value.lower() == 'true':
+                    parsed_value = True
+                elif value.lower() == 'false':
+                    parsed_value = False
+                else:
+                    parsed_value = value
+            else:
+                parsed_value = value
+            context[key] = parsed_value
+            current_template_context[key] = parsed_value
+
+        # Add kwargs dict for templates to iterate over
+        context["kwargs"] = keyword_args
+
+        # Store this template's context for future templates
+        previous_contexts[template_name] = current_template_context
+
+        # Render template
+        from jinja2 import Environment
+
+        def finalize_value(value):
+            """Convert Python True/False to lowercase true/false for YAML/JSON compatibility."""
+            if isinstance(value, bool):
+                return 'true' if value else 'false'
+            return value
+
+        env = Environment(finalize=finalize_value)
+        template_str = template_def.get("template", "")
+        jinja_template = env.from_string(template_str)
+        rendered = jinja_template.render(**context)
+
+        # Split rendered template into individual labels
+        for line in rendered.split('\n'):
+            line = line.strip()
+            if line and line.startswith('-'):
+                line_content = line[2:].strip()
+
+                # Check if this line contains a template call that needs recursive rendering
+                if line_content.startswith('@'):
+                    # Recursively render nested templates, passing along the contexts and counters
+                    nested_rendered = render_label_templates(
+                        [line_content],
+                        container_name,
+                        config,
+                        previous_contexts=previous_contexts,
+                        template_counters=template_counters
+                    )
+                    # Add all recursively rendered labels
+                    rendered_labels.extend(nested_rendered)
+                elif line_content:
+                    rendered_labels.append(line_content)
+
+    return rendered_labels
+
+
+def render_label_templates(
+    labels: list[str] | None,
+    container_name: str,
+    config: dict[str, Any],
+    previous_contexts: dict[str, dict[str, Any]] | None = None,
+    template_counters: dict[str, int] | None = None
+) -> list[str]:
+    """
+    Process label templates in the format @template(args, key=value).
+    Expands templates from config['labels'] section.
+    Detects duplicate labels and raises an error if values conflict.
+    Templates can access the context of previously rendered templates.
+    Supports recursive template calls (templates can call other templates).
+    """
+    if not labels:
+        return []
+
+    # Initialize mutable defaults
+    if previous_contexts is None:
+        previous_contexts = {}
+    if template_counters is None:
+        template_counters = {}
+
+    label_templates = config.get("labels", {})
+    rendered_labels = []
+    label_map = {}  # Track label keys and their values to detect conflicts
+
+    for label in labels:
+        template_name, positional_args, keyword_args = parse_label_template_call(label)
+
+        if template_name is None:
+            # Not a template call, keep as-is
+            rendered_labels.append(label)
+            continue
+
+        # Look up template definition
+        if template_name not in label_templates:
+            console.print(f"[yellow]Warning:[/yellow] Unknown label template: @{template_name}")
+            rendered_labels.append(label)
+            continue
+
+        template_def = label_templates[template_name]
+        template_args = template_def.get("args", [])
+        template_defaults = template_def.get("defaults", {})
+        template_str = template_def.get("template", "")
+
+        # Increment counter for this template
+        if template_name not in template_counters:
+            template_counters[template_name] = 0
+        template_counters[template_name] += 1
+
+        # Build template context starting with base values
+        context = {
+            "container": container_name,
+            "index": template_counters[template_name],
+        }
+
+        # Add contexts from previous templates
+        for prev_template_name, prev_context in previous_contexts.items():
+            context[prev_template_name] = prev_context
+
+        # Build the current template's argument context
+        current_template_context = {}
+
+        # Build kwargs dict with only user-provided arguments (no defaults)
+        kwargs_dict = {}
+
+        # Apply defaults first
+        for key, value in template_defaults.items():
+            context[key] = value
+            current_template_context[key] = value
+
+        # Add positional arguments (override defaults)
+        for i, arg_name in enumerate(template_args):
+            if i < len(positional_args):
+                value = positional_args[i]
+                context[arg_name] = value
+                current_template_context[arg_name] = value
+                kwargs_dict[arg_name] = value
+
+        # Add keyword arguments (override defaults and positional args)
+        for key, value in keyword_args.items():
+            # Parse boolean values
+            if value.lower() == 'true':
+                parsed_value = True
+            elif value.lower() == 'false':
+                parsed_value = False
+            else:
+                parsed_value = value
+            context[key] = parsed_value
+            current_template_context[key] = parsed_value
+            kwargs_dict[key] = parsed_value
+
+        # Add kwargs dict to context for templates to iterate over user-provided args
+        context["kwargs"] = kwargs_dict
+
+        # Store this template's context for future templates
+        previous_contexts[template_name] = current_template_context
+
+        # Render template with custom Jinja2 environment
+        from jinja2 import Environment
+
+        # Create custom environment with finalize function to convert booleans
+        def finalize_value(value):
+            """Convert Python True/False to lowercase true/false for YAML/JSON compatibility."""
+            if isinstance(value, bool):
+                return 'true' if value else 'false'
+            return value
+
+        env = Environment(finalize=finalize_value)
+
+        jinja_template = env.from_string(template_str)
+        rendered = jinja_template.render(**context)
+
+        # Split rendered template into individual labels (one per line, strip empty)
+        for line in rendered.split('\n'):
+            line = line.strip()
+            if line and line.startswith('-'):
+                # Remove leading "- " from YAML list format
+                line_content = line[2:].strip()
+
+                # Check if this line contains a template call that needs recursive rendering
+                if line_content.startswith('@'):
+                    # Recursively render nested templates, passing along the contexts and counters
+                    nested_rendered = render_label_templates(
+                        [line_content],
+                        container_name,
+                        config,
+                        previous_contexts=previous_contexts,
+                        template_counters=template_counters
+                    )
+                    # Add all recursively rendered labels
+                    rendered_labels.extend(nested_rendered)
+                else:
+                    rendered_labels.append(line_content)
+
+    # Check for duplicate labels and conflicts
+    final_labels = []
+    for label in rendered_labels:
+        if '=' in label:
+            key, value = label.split('=', 1)
+        else:
+            # Labels without '=' (just keys)
+            key = label
+            value = None
+
+        if key in label_map:
+            # Duplicate label found
+            existing_value = label_map[key]
+            if existing_value != value:
+                # Conflict: same key, different values
+                console.print(f"[red]Error:[/red] Duplicate label '{key}' with conflicting values in container '{container_name}':")
+                console.print(f"  First value:  {existing_value if existing_value is not None else '(no value)'}")
+                console.print(f"  Second value: {value if value is not None else '(no value)'}")
+                raise typer.Exit(1)
+            # Otherwise, it's a duplicate with the same value - just skip it
+        else:
+            # New label, add it
+            label_map[key] = value
+            final_labels.append(label)
+
+    return final_labels
+
+
+def merge_environment(base_env: list[str] | None, service_env: list[str] | None) -> list[str]:
+    """
+    Merge environment variables, allowing service_env to override base_env.
+    Both inputs are lists in the format ['KEY=value', 'KEY2=value2'].
+    Service environment variables override base environment variables.
+    """
+    if base_env is None and service_env is None:
+        return []
+    if base_env is None:
+        return service_env or []
+    if service_env is None:
+        return base_env
+
+    # Convert to dicts for merging
+    base_dict = {}
+    for item in base_env:
+        if "=" in item:
+            key, value = item.split("=", 1)
+            base_dict[key] = value
+
+    service_dict = {}
+    for item in service_env:
+        if "=" in item:
+            key, value = item.split("=", 1)
+            service_dict[key] = value
+
+    # Merge: service overrides base
+    merged = {**base_dict, **service_dict}
+
+    # Convert back to list format
+    return [f"{k}={v}" for k, v in merged.items()]
+
+
+def merge_networks(base_networks: dict[str, Any] | None, service_networks: dict[str, Any] | None) -> dict[str, Any]:
+    """
+    Merge network configurations, allowing service_networks to override base_networks.
+    Both inputs are dicts in the format {'network_name': config_or_null}.
+    Service networks override base networks.
+    """
+    if base_networks is None and service_networks is None:
+        return {}
+    if base_networks is None:
+        return service_networks or {}
+    if service_networks is None:
+        return base_networks
+
+    # Merge: service overrides base
+    return {**base_networks, **service_networks}
+
+
+def apply_common_container_config(service_config: dict[str, Any], common_config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Apply common container configuration to a service, merging where applicable.
+    Service-specific values override common values.
+    """
+    if not common_config:
+        return service_config
+
+    # Process each property in common config
+    for key, common_value in common_config.items():
+        if common_value is None:
+            continue
+
+        service_value = service_config.get(key)
+
+        # Special handling for specific properties
+        if key == "environment":
+            # Merge environment variables (lists with KEY=VALUE format)
+            merged_env = merge_environment(common_value, service_value)
+            if merged_env:
+                service_config[key] = merged_env
+
+        elif key == "networks":
+            # Merge networks (only if service doesn't use network_mode: host)
+            if service_config.get("network_mode") != "host":
+                merged_networks = merge_networks(common_value, service_value)
+                if merged_networks:
+                    service_config[key] = merged_networks
+
+        elif isinstance(common_value, dict) and isinstance(service_value, dict):
+            # For nested dicts (like logging), do a deep merge
+            service_config[key] = deep_merge(common_value, service_value)
+
+        elif service_value is None:
+            # If service doesn't have this property, add it from common
+            service_config[key] = common_value
+
+        # If service has the property and it's not a dict, service value takes precedence (do nothing)
+
+    return service_config
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """
+    Deep merge two dictionaries. Override values take precedence.
+    For nested dicts, merges recursively. For other types, override replaces base.
+    """
+    result = base.copy()
+
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            # Recursively merge nested dicts
+            result[key] = deep_merge(result[key], value)
+        else:
+            # Override replaces base
+            result[key] = value
+
+    return result
+
+
+def replace_secrets(yaml_content: str, secrets_path: Path, redacted: bool = False) -> str:
+    """
+    Replace $variable placeholders with values from secrets file.
+    Only replaces variables that exist in the secrets file.
+    Docker compose also uses $variable syntax for environment variables,
+    so we only replace if the variable is found in secrets.
+
+    Args:
+        yaml_content: The YAML content to process
+        secrets_path: Path to the .secrets.yml file
+        redacted: If True, replace all secrets with "<REDACTED>" instead of actual values
+    """
+    if not secrets_path.exists():
+        # No secrets file, return content as-is
+        return yaml_content
+
+    # Load secrets
+    with open(secrets_path) as f:
+        secrets = yaml.safe_load(f) or {}
+
+    # Replace each secret
+    result = yaml_content
+    for key, value in secrets.items():
+        # Replace $key with the value or <REDACTED>
+        # Use a pattern that matches $key as a whole word
+        pattern = r'\$' + re.escape(key) + r'\b'
+        replacement_value = "<REDACTED>" if redacted else str(value)
+        result = re.sub(pattern, replacement_value, result)
+
+    return result
+
+
+def render_compose(template: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Render the docker-compose template with boilerplate."""
+    if "services" not in template:
+        return template
+
+    # Get common container configuration
+    common_container = config.get("common", {}).get("container", {})
+
+    for service_name, service_config in template["services"].items():
+        # Process volumes first
+        if "volumes" in service_config:
+            processed_volumes = []
+            for volume in service_config["volumes"]:
+                # Only process string volumes (short syntax)
+                # Dict volumes (long syntax) are passed through as-is
+                if isinstance(volume, str):
+                    processed_volumes.append(
+                        parse_volume_placeholder(volume, service_name, config)
+                    )
+                else:
+                    processed_volumes.append(volume)
+            service_config["volumes"] = processed_volumes
+
+        # Apply common container configuration (environment, networks, etc.)
+        service_config = apply_common_container_config(service_config, common_container)
+
+        # Process x-features first, then merge with labels
+        all_labels = []
+
+        # Process x-features if present
+        if "x-features" in service_config:
+            x_features_labels = process_x_features(
+                service_config["x-features"], service_name, config
+            )
+            all_labels.extend(x_features_labels)
+            # Remove x-features from final config (it's only for processing)
+            del service_config["x-features"]
+
+        # Process label templates from labels section
+        if "labels" in service_config:
+            template_labels = render_label_templates(
+                service_config["labels"], service_name, config
+            )
+            all_labels.extend(template_labels)
+
+        # Set combined labels if any were generated
+        if all_labels:
+            service_config["labels"] = all_labels
+
+        # Build new config with proper field order
+        new_config = {}
+
+        # Add fields in desired order
+        field_order = [
+            "image", "container_name", "cap_add", "privileged", "volumes",
+            "devices", "ports", "restart", "networks", "environment"
+        ]
+
+        # First, add fields that exist in the original config in order
+        for field in field_order:
+            if field in service_config:
+                new_config[field] = service_config[field]
+            elif field == "container_name":
+                # Add container_name after image
+                new_config["container_name"] = service_name
+            elif field == "restart":
+                # Add restart policy at the end
+                new_config["restart"] = "unless-stopped"
+
+        # Add any remaining fields that weren't in our order list
+        for field, value in service_config.items():
+            if field not in new_config:
+                new_config[field] = value
+
+        # Update the service config
+        template["services"][service_name] = new_config
+
+    # Merge common compose-level configuration (e.g., networks, volumes)
+    common_compose = config.get("common", {}).get("compose", {})
+    if common_compose:
+        template = deep_merge(template, common_compose)
+
+    return template
+
+
+def preprocess_yaml(content: str) -> str:
+    """
+    Preprocess YAML content to quote @ placeholders.
+    YAML treats @ as a reserved character, so we need to quote it.
+    """
+    lines = []
+    for line in content.split("\n"):
+        # Check if line contains an unquoted @ in a volume definition
+        stripped = line.lstrip()
+        if stripped.startswith("- @"):
+            # Extract the indentation
+            indent = line[: len(line) - len(stripped)]
+            # Extract value and preserve comment
+            value = stripped[2:]  # Remove "- "
+            # Split on comment
+            if "#" in value:
+                value_part, comment_part = value.split("#", 1)
+                value_part = value_part.rstrip()
+                lines.append(f'{indent}- "{value_part}"  # {comment_part}')
+            else:
+                lines.append(f'{indent}- "{value}"')
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+# ============================================================================
+# TrueNAS Integration
+# ============================================================================
+
+def load_truenas_config() -> dict[str, Any]:
+    """Load TrueNAS configuration from config file."""
+    if not TRUENAS_CONFIG_FILE.exists():
+        return {}
+
+    with open(TRUENAS_CONFIG_FILE) as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_truenas_config(config: dict[str, Any]):
+    """Save TrueNAS configuration to config file."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    with open(TRUENAS_CONFIG_FILE, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+
+def get_truenas_client() -> Client:
+    """Get a TrueNAS API client using stored credentials."""
+    config = load_truenas_config()
+
+    if not config.get("host"):
+        console.print("[red]Error:[/red] TrueNAS host not configured. Run 'dalboplex login' first.")
+        raise typer.Exit(1)
+
+    if not config.get("api_key"):
+        console.print("[red]Error:[/red] TrueNAS API key not configured. Run 'dalboplex login' first.")
+        raise typer.Exit(1)
+
+    host = config["host"]
+    api_key = config["api_key"]
+
+    # Ensure proper WebSocket URL format
+    if not host.startswith(("ws://", "wss://")):
+        # Always use wss:// (secure WebSocket) for API key authentication
+        if host.startswith("http://"):
+            host = host.replace("http://", "wss://")
+        elif host.startswith("https://"):
+            host = host.replace("https://", "wss://")
+        else:
+            host = f"wss://{host}"
+
+    # Add /api/current path if not present
+    if not host.endswith(("/websocket", "/api/current")):
+        host = f"{host.rstrip('/')}/api/current"
+
+    # Disable SSL verification for self-signed certificates (set in login command)
+    client = Client(uri=host)
+    client.call("auth.login_with_api_key", api_key)
+    return client
+
+
+@app.command()
+def login(
+    host: str = typer.Option(..., "--host", "-h", prompt=True, help="TrueNAS host (e.g., truenas.local or https://truenas.local)"),
+    api_key: str = typer.Option(..., "--api-key", "-k", prompt=True, hide_input=True, help="TrueNAS API key"),
+    github_token: Optional[str] = typer.Option(None, "--github-token", "-g", help="GitHub personal access token (optional, for publish command)"),
+    imgbb_api_key: Optional[str] = typer.Option(None, "--imgbb-api-key", help="imgbb API key (optional, for image hosting in gists)"),
+):
+    """
+    Configure TrueNAS connection credentials and optionally GitHub/imgbb tokens.
+
+    This stores your TrueNAS host and API key for use with other commands.
+    You can generate an API key in the TrueNAS UI under System Settings > API Keys.
+
+    Optionally provide a GitHub token (with 'gist' scope) for the publish command.
+    Create a token at: https://github.com/settings/tokens
+
+    Optionally provide an imgbb API key for hosting screenshots in gists.
+    Get a free API key at: https://api.imgbb.com/
+    """
+    # Test the connection
+    console.print("[blue]Testing connection...[/blue]")
+
+    try:
+        # Normalize host URL
+        test_host = host
+        if not test_host.startswith(("ws://", "wss://")):
+            # Always use wss:// (secure WebSocket) for API key authentication
+            if test_host.startswith("http://"):
+                test_host = test_host.replace("http://", "wss://")
+            elif test_host.startswith("https://"):
+                test_host = test_host.replace("https://", "wss://")
+            else:
+                test_host = f"wss://{test_host}"
+
+        if not test_host.endswith(("/websocket", "/api/current")):
+            test_host = f"{test_host.rstrip('/')}/api/current"
+
+        with Client(uri=test_host) as c:
+            # Authenticate with API key
+            console.print(f"[dim]Authenticating...[/dim]")
+            auth_result = c.call("auth.login_with_api_key", api_key)
+            console.print(f"[dim]Auth result: {auth_result}[/dim]")
+
+            # Test connection by getting system info
+            console.print(f"[dim]Getting system info...[/dim]")
+            info = c.call("system.info")
+            hostname = info.get("hostname", "Unknown")
+            version = info.get("version", "Unknown")
+
+            console.print(f"[green]✓[/green] Connected to {hostname} (TrueNAS {version})")
+
+    except Exception as e:
+        console.print(f"[red]✗ Connection failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Save configuration
+    config = {
+        "host": host,
+        "api_key": api_key,
+    }
+    if github_token:
+        config["github_token"] = github_token
+    if imgbb_api_key:
+        config["imgbb_api_key"] = imgbb_api_key
+
+    save_truenas_config(config)
+
+    console.print(f"[green]✓[/green] Credentials saved to {TRUENAS_CONFIG_FILE}")
+    if github_token:
+        console.print(f"[green]✓[/green] GitHub token saved")
+    if imgbb_api_key:
+        console.print(f"[green]✓[/green] imgbb API key saved")
+
+
+@app.command()
+def status():
+    """
+    List all apps running on TrueNAS and their status.
+
+    Shows the status of all custom apps installed on your TrueNAS instance.
+    """
+    try:
+        with get_truenas_client() as client:
+            # Get system info
+            info = client.call("system.info")
+            hostname = info.get("hostname", "Unknown")
+
+            console.print(f"\n[bold]TrueNAS Host:[/bold] {hostname}\n")
+
+            # Get all apps
+            apps = client.call("app.query")
+
+            if not apps:
+                console.print("[yellow]No apps found.[/yellow]")
+                return
+
+            # Create a table
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Name", style="dim", width=20)
+            table.add_column("State", width=15)
+            table.add_column("Version", width=15)
+            table.add_column("Active Workloads", justify="right", width=15)
+
+            for app in apps:
+                name = app.get("name", "Unknown")
+                state = app.get("state", "unknown")
+                version = app.get("version", "N/A")
+
+                # Get active workload count
+                active_workloads = 0
+                if app.get("active_workloads"):
+                    active_workloads = len(app["active_workloads"])
+
+                # Color code the state
+                state_lower = state.lower()
+                if state_lower == "running":
+                    state_display = f"[green]{state}[/green]"
+                elif state_lower == "stopped":
+                    state_display = f"[red]{state}[/red]"
+                elif state_lower == "deploying":
+                    state_display = f"[yellow]{state}[/yellow]"
+                else:
+                    state_display = f"[dim]{state}[/dim]"
+
+                table.add_row(
+                    name,
+                    state_display,
+                    version,
+                    str(active_workloads)
+                )
+
+            console.print(table)
+            console.print(f"\n[dim]Total apps: {len(apps)}[/dim]\n")
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def update(
+    app_name: str = typer.Argument(..., help="Name of the application to update"),
+    config: Path = typer.Option("apps/.config.yml", "--config", "-c", help="Render configuration file"),
+    apps_dir: Path = typer.Option("apps", "--apps-dir", help="Directory containing app definitions"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force update even if configuration hasn't changed"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Render and display the configuration without updating"),
+):
+    """
+    Update a TrueNAS app by rendering and deploying its docker-compose configuration.
+
+    This command will:
+    1. Find the <app_name>.yml in apps/
+    2. Render it with the configured templates
+    3. Update the app in TrueNAS with the rendered configuration
+
+    Use --dry-run to preview the rendered configuration without making changes.
+    """
+    if not dry_run:
+        console.print(f"[blue]Updating app:[/blue] {app_name}")
+
+    # Load state file
+    state_path = apps_dir / ".state" / "state.yml"
+    state = load_state(state_path)
+
+    # Check if compose file exists
+    compose_file = apps_dir / f"{app_name}.yml"
+    if not compose_file.exists():
+        console.print(f"[red]Error:[/red] {app_name}.yml not found in {apps_dir}")
+        raise typer.Exit(1)
+
+    # Render the docker-compose file
+    try:
+        # Load and render the template
+        with open(compose_file) as f:
+            content = f.read()
+            preprocessed = preprocess_yaml(content)
+            template = yaml.safe_load(preprocessed)
+
+        render_config = load_config(config)
+        rendered = render_compose(template, render_config)
+
+        # Save rendered file to apps/.state/rendered/<app_name>.yml
+        rendered_dir = apps_dir / ".state" / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+
+        output_file = rendered_dir / f"{app_name}.yml"
+        with open(output_file, "w") as f:
+            yaml.dump(
+                rendered,
+                f,
+                Dumper=NoAliasDumper,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+                width=1000,
+            )
+
+        # Convert rendered config to YAML string for TrueNAS
+        rendered_yaml = yaml.dump(rendered, Dumper=NoAliasDumper, default_flow_style=False, sort_keys=False, allow_unicode=True, width=1000)
+
+        # Replace secrets from .secrets.yml
+        secrets_path = apps_dir / ".secrets.yml"
+        rendered_yaml = replace_secrets(rendered_yaml, secrets_path)
+
+        # Check for installed version and show diff
+        installed_dir = apps_dir / ".state" / "installed"
+        installed_file = installed_dir / f"{app_name}.yml"
+
+        if installed_file.exists():
+            with open(installed_file) as f:
+                installed_yaml = f.read()
+
+            # Show diff between installed and newly rendered
+            if dry_run:
+                console.print(f"[blue]Comparing with installed version[/blue]")
+                show_diff(installed_yaml, rendered_yaml, f"installed/{app_name}.yml", f"rendered/{app_name}.yml")
+                return
+            else:
+                # Show diff before updating (unless they're identical)
+                if installed_yaml != rendered_yaml:
+                    show_diff(installed_yaml, rendered_yaml, f"installed/{app_name}.yml", f"rendered/{app_name}.yml")
+        else:
+            # No installed version exists
+            if dry_run:
+                from rich.syntax import Syntax
+                console.print("[yellow]No installed version found - showing rendered config:[/yellow]\n")
+                syntax = Syntax(rendered_yaml, "yaml", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                return
+            else:
+                console.print("[dim]No previous installation found[/dim]")
+
+        # Compute hash of the rendered configuration
+        new_hash = compute_config_hash(rendered_yaml)
+
+        # Check if configuration has changed (unless force flag is set)
+        if not force and app_name in state and state[app_name].get("hash") == new_hash:
+            console.print(f"[yellow]⊘[/yellow] No changes detected (use --force to update anyway)")
+            return
+
+        if force and app_name in state and state[app_name].get("hash") == new_hash:
+            console.print(f"[yellow]⚠[/yellow] Forcing update (no changes detected)")
+
+        with get_truenas_client() as client:
+            # Check if app exists
+            apps = client.call("app.query", [["name", "=", app_name]])
+            app_exists = len(apps) > 0
+
+            # Extract and ensure directories exist with correct permissions
+            dirs_to_ensure = extract_default_volume_dirs(rendered, render_config)
+            if dirs_to_ensure:
+                ensure_directories(client, dirs_to_ensure)
+
+            if not app_exists:
+                # Create new app
+                try:
+                    create_data = {
+                        "custom_app": True,
+                        "app_name": app_name,
+                        "version": "1.0.0",
+                        "train": "stable",
+                        "custom_compose_config_string": rendered_yaml,
+                    }
+                    result = client.call("app.create", create_data)
+                    console.print(f"[green]✓[/green] Created '{app_name}'")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to create app: {e}")
+                    raise typer.Exit(1)
+            else:
+                # Update existing app
+                try:
+                    update_data = {
+                        "custom_compose_config_string": rendered_yaml,
+                    }
+                    result = client.call("app.update", app_name, update_data)
+                    console.print(f"[green]✓[/green] Updated '{app_name}'")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to update app: {e}")
+                    raise typer.Exit(1)
+
+            # Save the new hash to state file only after successful deployment
+            if app_name not in state:
+                state[app_name] = {}
+            state[app_name]["hash"] = new_hash
+            save_state(state_path, state)
+
+            # Save the rendered file with secrets to installed directory
+            installed_dir.mkdir(parents=True, exist_ok=True)
+            with open(installed_file, "w") as f:
+                f.write(rendered_yaml)
+            console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
+
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] File not found: {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        raise typer.Exit(1)
+
+
+def _render_single_file(
+    input_file: Path,
+    output_file: Optional[Path],
+    render_config: dict,
+    redacted: bool,
+) -> Path:
+    """Helper function to render a single compose file."""
+    # Determine output file
+    if output_file is None:
+        # Default to apps/.state/rendered/{app_name}.yml
+        app_name = input_file.stem
+        output_dir = input_file.parent / ".state" / "rendered"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{app_name}.yml"
+
+    # Load files with preprocessing
+    with open(input_file) as f:
+        content = f.read()
+        preprocessed = preprocess_yaml(content)
+        template = yaml.safe_load(preprocessed)
+
+    # Render template
+    rendered = render_compose(template, render_config)
+
+    # Convert to YAML string
+    rendered_yaml = yaml.dump(
+        rendered,
+        Dumper=NoAliasDumper,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+        width=1000,  # Prevent line wrapping
+    )
+
+    # Replace secrets from .secrets.yml
+    secrets_path = input_file.parent / ".secrets.yml"
+    rendered_yaml = replace_secrets(rendered_yaml, secrets_path, redacted=redacted)
+
+    # Write output with proper formatting
+    with open(output_file, "w") as f:
+        f.write(rendered_yaml)
+
+    return output_file
+
+
+@app.command()
+def render(
+    input_file: Optional[Path] = typer.Argument(None, help="Input docker-compose template file"),
+    output_file: Optional[Path] = typer.Argument(None, help="Output file (default: apps/.state/rendered/{app_name}.yml)"),
+    config: Path = typer.Option("apps/.config.yml", "--config", "-c", help="Render configuration file"),
+    redacted: bool = typer.Option(False, "--redacted", help="Replace all secrets with '<REDACTED>' instead of actual values"),
+    all_apps: bool = typer.Option(False, "--all", help="Render all app compose files in apps/ directory"),
+):
+    """
+    Render a docker-compose template with boilerplate and path replacements.
+
+    Processes volume placeholders like @config, @data, @docker and merges
+    environment variables from the config file.
+    """
+    render_config = load_config(config)
+
+    if all_apps:
+        # Find all .yml files in apps/ directory (excluding subdirectories and hidden files)
+        apps_dir = Path("apps")
+        if not apps_dir.exists():
+            typer.echo("Error: apps/ directory not found", err=True)
+            raise typer.Exit(1)
+
+        compose_files = sorted([f for f in apps_dir.glob("*.yml") if not f.name.startswith(".")])
+        if not compose_files:
+            typer.echo("No .yml files found in apps/ directory", err=True)
+            raise typer.Exit(1)
+
+        typer.echo(f"Rendering {len(compose_files)} compose files...")
+        for compose_file in compose_files:
+            output = _render_single_file(compose_file, None, render_config, redacted)
+            typer.echo(f"  {compose_file} -> {output}")
+
+        typer.echo(f"\nSuccessfully rendered {len(compose_files)} files")
+    else:
+        if input_file is None:
+            typer.echo("Error: input_file is required when --all is not specified", err=True)
+            raise typer.Exit(1)
+
+        output = _render_single_file(input_file, output_file, render_config, redacted)
+        typer.echo(f"Rendered {input_file} -> {output}")
+
+
+def compute_file_hash(file_path: Path) -> str:
+    """Compute SHA256 hash of a file."""
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def upload_to_imgbb(image_path: Path, api_key: str) -> Optional[str]:
+    """Upload an image to imgbb and return the hosted URL.
+
+    Images are converted to JPEG before uploading.
+    """
+    try:
+        import base64
+        from io import BytesIO
+        from PIL import Image
+
+        # Open and convert image to JPEG
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (for PNG with transparency)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = rgb_img
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # Save as JPEG to BytesIO buffer
+            buffer = BytesIO()
+            img.save(buffer, format='JPEG', quality=85, optimize=True)
+            buffer.seek(0)
+
+            # Base64 encode
+            image_data = base64.b64encode(buffer.read()).decode()
+
+        response = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": api_key,
+                "image": image_data,
+            },
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            return data["data"]["url"]
+        else:
+            console.print(f"[yellow]Warning: Failed to upload image to imgbb (HTTP {response.status_code})[/yellow]")
+            return None
+    except Exception as e:
+        console.print(f"[yellow]Warning: Failed to upload image to imgbb: {e}[/yellow]")
+        return None
+
+
+@app.command()
+def publish(
+    token: Optional[str] = typer.Option(None, "--token", "-t", envvar="GITHUB_TOKEN", help="GitHub personal access token"),
+    config: Path = typer.Option("apps/.config.yml", "--config", "-c", help="Render configuration file"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be published without actually publishing"),
+    imgbb_api_key: Optional[str] = typer.Option(None, "--imgbb-api-key", envvar="IMGBB_API_KEY", help="imgbb API key for image hosting"),
+):
+    """
+    Publish all compose files as a private GitHub gist.
+
+    For each compose file, two separate files are created in the gist:
+    - {app_name}.yml - the rendered version with redacted secrets
+    - {app_name}.template.yml - the original template
+
+    Requires a GitHub personal access token with 'gist' scope.
+    Provide via --token flag, GITHUB_TOKEN environment variable, or it will be loaded from stored config.
+    The token will be saved for future use.
+
+    Optionally provide an imgbb API key to upload screenshots for display in the gist.
+    Get a free API key at: https://api.imgbb.com/
+    """
+    # Load stored credentials
+    stored_config = load_truenas_config()
+
+    # Use stored token if not provided (skip check in dry-run mode)
+    if not dry_run:
+        if not token:
+            token = stored_config.get("github_token")
+
+        if not token:
+            typer.echo("Error: GitHub token required. Provide via --token flag, GITHUB_TOKEN environment variable, or run login command", err=True)
+            typer.echo("Create a token at: https://github.com/settings/tokens (requires 'gist' scope)", err=True)
+            raise typer.Exit(1)
+
+        # Save token for future use if it's new or different
+        if token != stored_config.get("github_token"):
+            stored_config["github_token"] = token
+            save_truenas_config(stored_config)
+            typer.echo("GitHub token saved for future use")
+
+    # Get imgbb API key from config if not provided
+    if not imgbb_api_key:
+        imgbb_api_key = stored_config.get("imgbb_api_key")
+
+    # Save imgbb API key if provided and different
+    if imgbb_api_key and imgbb_api_key != stored_config.get("imgbb_api_key"):
+        stored_config["imgbb_api_key"] = imgbb_api_key
+        save_truenas_config(stored_config)
+        typer.echo("imgbb API key saved for future use")
+
+    # Find all compose files
+    apps_dir = Path("apps")
+    if not apps_dir.exists():
+        typer.echo("Error: apps/ directory not found", err=True)
+        raise typer.Exit(1)
+
+    compose_files = sorted([f for f in apps_dir.glob("*.yml") if not f.name.startswith(".")])
+    if not compose_files:
+        typer.echo("No .yml files found in apps/ directory", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Preparing {len(compose_files)} compose files for publishing...")
+
+    # Load render config
+    render_config = load_config(config)
+
+    # Set up state directory and load state
+    state_dir = apps_dir / ".state"
+    state_dir.mkdir(exist_ok=True)
+    state_file = state_dir / "state.yml"
+
+    # Load existing state
+    state = {}
+    if state_file.exists():
+        with open(state_file) as f:
+            state = yaml.safe_load(f) or {}
+
+    # Initialize state structure if needed
+    if "screenshots" not in state:
+        state["screenshots"] = {}
+
+    # Prepare gist files
+    gist_files = {}
+
+    # Add README.md if it exists
+    readme_path = Path("README.md")
+    if readme_path.exists():
+        with open(readme_path) as f:
+            readme_content = f.read()
+
+        # Handle dashboard screenshot
+        dashboard_path = Path("assets/dashboard.png")
+        if dashboard_path.exists() and imgbb_api_key:
+            imgbb_url = None
+
+            # Compute current file hash
+            current_hash = compute_file_hash(dashboard_path)
+
+            # Check if we have a cached URL with matching hash
+            dashboard_state = state["screenshots"].get("dashboard", {})
+            cached_hash = dashboard_state.get("hash")
+            cached_url = dashboard_state.get("url")
+
+            if cached_hash == current_hash and cached_url:
+                imgbb_url = cached_url
+                typer.echo("  Using cached imgbb URL for dashboard (unchanged)")
+            elif not dry_run:
+                typer.echo("  Uploading dashboard.png to imgbb...")
+                imgbb_url = upload_to_imgbb(dashboard_path, imgbb_api_key)
+                if imgbb_url:
+                    # Update state with new URL and hash
+                    state["screenshots"]["dashboard"] = {
+                        "path": str(dashboard_path),
+                        "hash": current_hash,
+                        "url": imgbb_url
+                    }
+                    typer.echo(f"  ✓ Uploaded to {imgbb_url}")
+
+            if imgbb_url:
+                # Replace local path with imgbb URL
+                readme_content = readme_content.replace(
+                    "![Dashboard](assets/dashboard.png)",
+                    f"![Dashboard]({imgbb_url})"
+                )
+            else:
+                # Fallback to note if upload failed
+                readme_content = readme_content.replace(
+                    "![Dashboard](assets/dashboard.png)\n*Homepage dashboard showing all services and monitoring widgets*",
+                    "*Note: Dashboard screenshot available in the source repository*"
+                )
+        elif dashboard_path.exists():
+            # No imgbb API key, remove image reference
+            readme_content = readme_content.replace(
+                "![Dashboard](assets/dashboard.png)\n*Homepage dashboard showing all services and monitoring widgets*",
+                "*Note: Dashboard screenshot available in the source repository*"
+            )
+
+        gist_files["README.md"] = {"content": readme_content}
+        typer.echo("  Prepared README.md")
+
+    for compose_file in compose_files:
+        # Read template
+        with open(compose_file) as f:
+            template_content = f.read()
+
+        # Render with redacted secrets
+        preprocessed = preprocess_yaml(template_content)
+        template = yaml.safe_load(preprocessed)
+        rendered = render_compose(template, render_config)
+        rendered_yaml = yaml.dump(
+            rendered,
+            Dumper=NoAliasDumper,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            width=1000,
+        )
+
+        # Replace secrets with redacted values
+        secrets_path = compose_file.parent / ".secrets.yml"
+        rendered_yaml = replace_secrets(rendered_yaml, secrets_path, redacted=True)
+
+        # Add template and rendered as separate files
+        app_name = compose_file.stem
+        gist_files[f"{app_name}.yml"] = {"content": rendered_yaml}
+        gist_files[f"{app_name}.template.yml"] = {"content": template_content}
+
+        typer.echo(f"  Prepared {app_name}.yml and {app_name}.template.yml")
+
+    # Add dalboplex.py script
+    dalboplex_path = Path("dalboplex.py")
+    if dalboplex_path.exists():
+        with open(dalboplex_path) as f:
+            gist_files["z-dalboplex.py"] = {"content": f.read()}
+        typer.echo("  Prepared z-dalboplex.py")
+
+    # Add .config.yml
+    config_path = apps_dir / ".config.yml"
+    if config_path.exists():
+        with open(config_path) as f:
+            gist_files["z-config.yml"] = {"content": f.read()}
+        typer.echo("  Prepared z-config.yml")
+
+    # Check if we have an existing gist ID (try state.yml first, fallback to old file)
+    existing_gist_id = state.get("gist_id")
+
+    # Migrate from old gist_id file if it exists
+    if not existing_gist_id:
+        gist_id_file = state_dir / "gist_id"
+        if gist_id_file.exists():
+            existing_gist_id = gist_id_file.read_text().strip()
+            state["gist_id"] = existing_gist_id
+            # Remove old file after migration
+            gist_id_file.unlink()
+
+    if dry_run:
+        # Dry-run mode: show what would be published
+        typer.echo("\n[DRY RUN] Would publish the following files:")
+        for filename in gist_files.keys():
+            file_size = len(gist_files[filename]["content"])
+            typer.echo(f"  - {filename} ({file_size:,} bytes)")
+
+        typer.echo(f"\nTotal files: {len(gist_files)}")
+        if existing_gist_id:
+            typer.echo(f"Action: Would update existing gist {existing_gist_id}")
+        else:
+            typer.echo("Action: Would create new private gist")
+
+        typer.echo("\n[DRY RUN] No changes made. Run without --dry-run to publish.")
+        return
+
+    # GitHub API headers
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    if existing_gist_id:
+        # Update existing gist
+        typer.echo(f"\nUpdating existing gist {existing_gist_id}...")
+        url = f"https://api.github.com/gists/{existing_gist_id}"
+
+        # Fetch current gist to get list of existing files
+        get_response = requests.get(url, headers=headers)
+        if get_response.status_code == 200:
+            current_gist = get_response.json()
+            current_files = set(current_gist.get("files", {}).keys())
+            new_files = set(gist_files.keys())
+
+            # Mark files for deletion by setting them to null
+            files_to_delete = current_files - new_files
+            for filename in files_to_delete:
+                gist_files[filename] = None
+                typer.echo(f"  Removing {filename} from gist")
+
+        response = requests.patch(
+            url,
+            headers=headers,
+            json={
+                "description": "Dalboplex Infrastructure - Docker Compose files with documentation (auto-generated)",
+                "files": gist_files,
+            },
+        )
+
+        if response.status_code == 200:
+            gist_data = response.json()
+            typer.echo(f"✓ Successfully updated gist")
+            typer.echo(f"\nGist URL: {gist_data['html_url']}")
+        elif response.status_code == 404:
+            typer.echo(f"Warning: Existing gist not found. Creating new gist...")
+            existing_gist_id = None
+        else:
+            typer.echo(f"Error: Failed to update gist (HTTP {response.status_code})", err=True)
+            typer.echo(f"Response: {response.text}", err=True)
+            raise typer.Exit(1)
+
+    if not existing_gist_id:
+        # Create new gist
+        typer.echo("\nCreating new private gist...")
+        response = requests.post(
+            "https://api.github.com/gists",
+            headers=headers,
+            json={
+                "description": "Dalboplex Infrastructure - Docker Compose files with documentation (auto-generated)",
+                "public": False,
+                "files": gist_files,
+            },
+        )
+
+        if response.status_code == 201:
+            gist_data = response.json()
+            gist_id = gist_data["id"]
+
+            # Save gist ID to state
+            state["gist_id"] = gist_id
+
+            typer.echo(f"✓ Successfully created gist")
+            typer.echo(f"\nGist URL: {gist_data['html_url']}")
+        else:
+            typer.echo(f"Error: Failed to create gist (HTTP {response.status_code})", err=True)
+            typer.echo(f"Response: {response.text}", err=True)
+            raise typer.Exit(1)
+
+    # Save state to file
+    with open(state_file, "w") as f:
+        yaml.dump(state, f, default_flow_style=False, sort_keys=False)
+
+
+if __name__ == "__main__":
+    app()

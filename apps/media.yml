@@ -1,0 +1,144 @@
+version: '3.7'
+services:
+  # Movie collection manager
+  # https://wiki.servarr.com/radarr
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    volumes:
+      - @config
+      - @media
+    x-features:
+      - domain:
+          subdomain: movies
+          port: 7878
+      - homepage:
+          group: MediaPrimary
+          description: Movies
+          weight: 20
+      - widget:
+          key: $RADARR_API_KEY
+          enableQueue: true
+          fields: wanted|queued|movies
+
+  # TV show collection manager
+  # https://wiki.servarr.com/sonarr
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    volumes:
+      - @config
+      - @media
+    x-features:
+      - domain:
+          subdomain: tv
+          port: 8989
+      - homepage:
+          group: MediaPrimary
+          description: TV shows
+          weight: 30
+      - widget:
+          key: $SONARR_API_KEY
+          enableQueue: true
+
+  # Quality profile and custom format management for *arr apps
+  # https://recyclarr.dev/
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr
+    user: 1000:1000
+    volumes:
+      - @config
+
+  # Indexer manager for Sonarr/Radarr
+  # https://wiki.servarr.com/prowlarr
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: indexers
+          port: 9696
+      - homepage:
+          group: Download
+          description: Indexer management
+          weight: 32
+      - widget:
+          key: $PROWLARR_API_KEY
+          fields: grabs|queries
+
+  # Subtitle management for Sonarr/Radarr
+  # https://wiki.bazarr.media/
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    volumes:
+      - @config
+      - @media
+    x-features:
+      - domain:
+          subdomain: subtitles
+          port: 6767
+      - homepage:
+          group: MediaSecondary
+          description: Subtitle management
+          weight: 20
+      - widget:
+          key: $BAZARR_API_KEY
+
+  # Media request and discovery platform
+  # https://docs.overseerr.dev/
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:develop
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: requests
+          alias: request
+          port: 5055
+          public: true
+      - homepage:
+          group: MediaSecondary
+          description: Media request portal
+          weight: 10
+      - widget:
+          key: $OVERSEERR_API_KEY
+          fields: pending|processing
+      - homepage:
+          group: Media
+          description: Media request portal
+          instance: public
+          weight: 200
+
+  # Plex metadata and collection management
+  # https://kometa.wiki/
+  kometa:
+    image: lscr.io/linuxserver/kometa:latest
+    environment:
+      - KOMETA_CONFIG=/config/config.yml
+      - KOMETA_TIME=04:00
+    volumes:
+      - @config
+    x-features:
+      - homepage:
+          group: MediaSecondary
+          description: Metadata management
+          href: https://docker.dalboplex.ch/show?name=kometa
+          weight: 40
+
+  # Plex collection management and organization
+  # https://github.com/jl94x4/collexions
+  collexions:
+    image: jl94x4/collexions-web:latest
+    user: 1000:1000
+    volumes:
+      - @config:/app/config
+      - @logs:/app/logs
+      - @data:/app/data
+    x-features:
+      - domain:
+          subdomain: collexions
+          port: 5000
+      - homepage:
+          group: MediaSecondary
+          description: Collection management
+          icon: mdi-bookmark-box-multiple-outline
+          weight: 50

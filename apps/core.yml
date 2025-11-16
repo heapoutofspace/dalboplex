@@ -1,0 +1,66 @@
+version: '3.7'
+services:
+  # Web-based file manager (Quantum fork)
+  # https://github.com/gtsteffaniak/filebrowser
+  filebrowser:
+    image: gtstef/filebrowser:beta
+    user: 1000:1000
+    environment:
+      - FILEBROWSER_CONFIG=data/config.yaml
+    volumes:
+      - /mnt/nvme/apps:/mnt/apps
+      - /mnt/hdd/media:/mnt/media
+      - /mnt/scratch/downloads:/mnt/downloads
+      - @data:/home/filebrowser/data
+    x-features:
+      - domain: files
+      - homepage:
+          group: System
+          description: File management
+          weight: 20
+
+  # Real-time Docker log viewer
+  # https://dozzle.dev/
+  dozzle:
+    image: amir20/dozzle:latest
+    user: 1000:999
+    volumes:
+      - @docker
+    environment:
+    - DOZZLE_ENABLE_ACTIONS=true
+    - DOZZLE_ENABLE_SHELL=true
+    x-features:
+      - domain:
+          subdomain: docker
+          port: 8080
+      - homepage:
+          group: System
+          description: Container management
+          weight: 30
+      - widget:
+          type: watchtower
+          url: http://watchtower:8080
+          key: $WATCHTOWER_HTTP_API_TOKEN
+
+  # Automatic container updates
+  # https://containrrr.dev/watchtower/
+  watchtower:
+    image: containrrr/watchtower
+    user: 1000:999
+    environment:
+      - WATCHTOWER_SCHEDULE=0 0 5 * * *
+      - WATCHTOWER_NOTIFICATION_URL=$WATCHTOWER_NOTIFICATION_URL
+      - WATCHTOWER_HTTP_API_METRICS=true
+      - WATCHTOWER_HTTP_API_TOKEN=$WATCHTOWER_HTTP_API_TOKEN
+    volumes:
+      - @docker
+
+  # Docker socket proxy for security
+  # https://github.com/Tecnativa/docker-socket-proxy
+  dockerproxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1 # Allow access to viewing containers
+      - POST=0 # Disallow any POST operations (effectively read-only)
+    volumes:
+      - @docker

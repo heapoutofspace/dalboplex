@@ -1,0 +1,66 @@
+version: '3.7'
+services:
+  # Media streaming and organization platform
+  # https://support.plex.tv/
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    ports:
+      - 32400:32400/tcp  # Plex Media Server
+      - 8324:8324/tcp    # Plex Companion
+      - 32469:32469/tcp  # DLNA
+      - 1900:1900/udp    # DLNA
+      - 32410:32410/udp  # GDM
+      - 32412:32412/udp  # GDM
+      - 32413:32413/udp  # GDM
+      - 32414:32414/udp  # GDM
+    environment:
+      - VERSION=docker
+    volumes:
+      - @config
+      - @media
+      - type: tmpfs
+        target: /transcode
+        tmpfs:
+          size: 17179869184  # 16 GB
+    devices:
+      - /dev/dri:/dev/dri
+    x-features:
+      - domain:
+          subdomain: plex
+          port: 32400
+          public: true
+      - homepage:
+          group: MediaPrimary
+          description: Media server
+          weight: 10
+      - widget:
+          type: tautulli
+          url: http://tautulli:8181
+          key: $TAUTULLI_API_KEY
+          enableUser: true
+          showEpisodeNumber: true
+          expandOneStreamToTwoRows: false
+      - homepage:
+          group: Media
+          description: Media server
+          weight: 10
+          instance: public
+      - widget:
+          key: $PLEX_API_KEY
+          fields: movies|tv
+
+
+  # Plex monitoring and statistics
+  # https://tautulli.com/
+  tautulli:
+    image: lscr.io/linuxserver/tautulli:latest
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: stats
+          port: 8181
+      - homepage:
+          group: MediaPrimary
+          description: Streaming statistics
+          weight: 15
