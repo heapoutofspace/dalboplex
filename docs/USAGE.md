@@ -8,7 +8,6 @@ This guide covers installation, deployment, and day-to-day management of the Dal
 
 - TrueNAS Scale 24.10+ (or any Docker host)
 - Python 3.11+
-- GitHub account (for gist publishing)
 - Domain with DNS API access (for Let's Encrypt)
 
 ### Installation
@@ -29,8 +28,7 @@ This guide covers installation, deployment, and day-to-day management of the Dal
    ```bash
    ./dalboplex.py login \
      --host https://truenas.local \
-     --api-key <your-api-key> \
-     --github-token <your-github-token>
+     --api-key <your-api-key>
    ```
 
 4. **Render compose files**:
@@ -70,22 +68,16 @@ This guide covers installation, deployment, and day-to-day management of the Dal
 #### Deploy to TrueNAS
 ```bash
 # Deploy an app
-./dalboplex.py deploy apps/plex.yml
-
-# Update an app (with confirmation prompt)
 ./dalboplex.py update apps/plex.yml
+
+# Deploy with dry-run to preview changes
+./dalboplex.py update apps/plex.yml --dry-run
+
+# Force deployment even without changes
+./dalboplex.py update apps/plex.yml --force
 
 # Check status of all apps
 ./dalboplex.py status
-```
-
-#### Publish to GitHub Gist
-```bash
-# Publish all compose files as private gist
-./dalboplex.py publish
-
-# First run will save gist ID for future updates
-# Subsequent runs will update the existing gist
 ```
 
 ### Configuration Files
@@ -95,7 +87,7 @@ This guide covers installation, deployment, and day-to-day management of the Dal
 | `apps/.config.yml` | Common settings, volumes, label templates |
 | `apps/.secrets.yml` | API keys and tokens (gitignored) |
 | `apps/.state/` | Deployment state and rendered configs |
-| `~/.config/dalboplex/truenas.yml` | TrueNAS & GitHub credentials |
+| `~/.config/dalboplex/truenas.yml` | TrueNAS credentials |
 
 ### Template System
 
@@ -158,15 +150,14 @@ environment:
   - RADARR_API_KEY=$RADARR_API_KEY
 ```
 
-During rendering, these are replaced with actual values. When publishing to GitHub, secrets are automatically redacted.
+During rendering, these are replaced with actual values.
 
 ### State Management
 
 The `.state/` directory tracks:
 - **state.yml**: Deployment metadata and configuration hashes
-- **rendered/**: Rendered compose files with secrets
-- **installed/**: Last deployed configuration
-- **gist_id**: GitHub Gist identifier for publishing
+- **rendered/**: Rendered compose files without secrets
+- **installed/**: Last deployed configuration with secrets
 
 ### Troubleshooting
 

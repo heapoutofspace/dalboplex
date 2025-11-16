@@ -110,7 +110,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 ### Media Management (Primary)
 
-**Compose files**: [plex.yml](#file-plex-yml), [media.yml](#file-media-yml)
+**Compose files**: [plex.yml](apps/plex.yml), [media.yml](apps/media.yml)
 
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
@@ -122,7 +122,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 ### Media Management (Secondary)
 
-**Compose file**: [media.yml](#file-media-yml)
+**Compose file**: [media.yml](apps/media.yml)
 
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
@@ -134,7 +134,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 ### Download Management
 
-**Compose file**: [download.yml](#file-download-yml)
+**Compose file**: [download.yml](apps/download.yml)
 
 | Application | Subdomain | Purpose                 |
 |-------------|-----------|-------------------------|
@@ -148,7 +148,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 ### Web Infrastructure
 
-**Compose files**: [web.yml](#file-web-yml), [core.yml](#file-core-yml)
+**Compose files**: [web.yml](apps/web.yml), [core.yml](apps/core.yml)
 
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
@@ -163,7 +163,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 ### Monitoring & Metrics
 
-**Compose file**: [monitoring.yml](#file-monitoring-yml)
+**Compose file**: [monitoring.yml](apps/monitoring.yml)
 
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
@@ -293,11 +293,10 @@ graph TB
 - **ZFS Snapshots**: Automated snapshots on critical pools
 - **Media Redundancy**: RAIDZ1 provides 1-drive fault tolerance per vdev
 - **Config Version Control**: Git repository for compose files
-- **Gist Publishing**: Automatic backup to GitHub
 
 ---
 
-**For installation and management instructions**, see [docs/USAGE.md](USAGE.md)
+**For installation and management instructions**, see [USAGE.md](docs/USAGE.md)
 
 ---
 
