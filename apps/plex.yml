@@ -48,6 +48,8 @@ services:
       - widget:
           key: $PLEX_API_KEY
           fields: movies|tv
+      - monitoring:
+          monitor: docker
 
 
   # Plex monitoring and statistics

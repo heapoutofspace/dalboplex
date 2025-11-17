@@ -11,6 +11,8 @@ common:
       driver: "json-file"
       options:
         max-size: "250m"
+    x-features:
+      - monitoring:
 
   compose:
     networks:
@@ -104,7 +106,7 @@ labels:
       instance: private
     template: |
       - homepage.instance.{{ instance }}.group={{ group }}
-      - homepage.instance.{{ instance }}.name={{ name or container|capitalize }}
+      - homepage.instance.{{ instance }}.name={{ name or container|replace('-', ' ')|title }}
       - homepage.instance.{{ instance }}.description={{ description }}
       - homepage.instance.{{ instance }}.weight={{ weight }}
       - homepage.instance.{{ instance }}.icon={{ icon or container }}
@@ -151,3 +153,29 @@ labels:
       {%- for metric in metrics %}
       {{ render_dict('homepage.instance.%s.widget.metrics[%i]' % (instance, loop.index0), metric) }}
       {%- endfor %}
+
+  monitoring:
+    template: |
+      {% set properties = {
+        'name': homepage.name if homepage and homepage.name else container|replace('-', ' ')|title,
+        'notification_names': '["discord"]',
+        'parent_name': app
+      } %}
+
+      {% if domain and not kwargs.pop('monitor', None) == 'docker' %}
+        {% set monitor = 'http' %}
+        {% do properties.update({'url': 'http://%s:%i' % (container, domain.port)}) %}
+      {% else %}
+        {% set monitor = 'docker' %}
+        {% do properties.update({
+          'docker_container': container,
+          'docker_host': 1
+        }) %}
+      {% endif %}
+
+      {% do properties.update(kwargs) %}
+
+      {% for key, value in properties.items() %}
+      - kuma.{{ container }}_{{ monitor }}.{{ monitor }}.{{ key }}={{ value }}
+      {% endfor %}
+      - kuma.{{ app }}.group.name={{ app|capitalize }}

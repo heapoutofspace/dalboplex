@@ -23,6 +23,7 @@ services:
       - homepage:
           group: Monitoring
           description: Metrics aggregation
+          weight: 50
       - widget:
 
   # Hard drive and SSD monitoring
@@ -60,7 +61,7 @@ services:
       - homepage:
           group: Monitoring
           description: Disk health monitoring
-          weight: 20
+          weight: 30
       - widget:
 
   # Internet connection monitoring and testing
@@ -84,7 +85,7 @@ services:
           group: Monitoring
           description: Internet speed monitoring
           icon: speedtest-tracker
-          weight: 30
+          weight: 40
       - widget:
           version: 2
           key: $SPEEDTEST_API_KEY
@@ -109,6 +110,7 @@ services:
       - homepage:
           group: Monitoring
           description: Resource monitoring
+          weight: 10
       - widget:
           version: 4
           metric: cpu
@@ -147,7 +149,7 @@ services:
       - homepage:
           group: Monitoring
           description: Experimental alternative monitoring
-          weight: 40
+          weight: 60
 
   # Beszel monitoring agent with hardware access
   # https://beszel.dev/
@@ -186,3 +188,42 @@ services:
       - /mnt/nvme/apps/beszel:/extra-filesystems/nvme:ro
       - @media:/extra-filesystems/hdd:ro
       - @downloads:/extra-filesystems/scratch:ro
+
+  # Service uptime monitoring with status pages and alerts
+  # https://github.com/louislam/uptime-kuma
+  uptime-kuma:
+    image: louislam/uptime-kuma:2-rootless
+    volumes:
+      - @data:/app/data
+    user: 1000:1000
+    x-features:
+      - domain:
+          subdomain: uptime
+          port: 3001
+      - homepage:
+          name: Uptime Kuma
+          group: Monitoring
+          description: Service availability & alerts
+          weight: 20
+      - widget:
+          type: uptimekuma
+          slug: all
+
+  # Automatic Uptime Kuma monitor creation from Docker labels
+  # https://github.com/BigBoot/AutoKuma
+  autokuma:
+    image: ghcr.io/bigboot/autokuma:latest
+    user: 1000:1000
+    volumes:
+      - @data
+    environment:
+      - AUTOKUMA__KUMA__URL=http://uptime-kuma:3001
+      - AUTOKUMA__DOCKER__HOSTS=http://dockerproxy:2375
+      - AUTOKUMA__ON_DELETE=keep
+    labels:
+      - kuma.docker.docker_host.name=Docker
+      - kuma.docker.docker_host.connection_type=tcp
+      - kuma.docker.docker_host.host=http://dockerproxy:2375
+      - kuma.discord.notification.name=Discord
+      - kuma.discord.notification.active=true
+      - 'kuma.discord.notification.config={"type": "discord", "discordWebhookUrl": "$UPTIME_KUMA_NOTIFICATION_URL"}'

@@ -315,7 +315,7 @@ def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, A
         raise ValueError(f"Mount config must have 'host' or 'host_path' key")
 
     host_path_template = Template(host_template_str)
-    host_path = host_path_template.render(container=service_name, folder=folder)
+    host_path = host_path_template.render(container=service_name, folder=folder, app=config.get("app"))
 
     # Determine mount path
     if len(parts) > 1:
@@ -328,7 +328,7 @@ def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, A
 
         # Render mount path template if it contains variables
         mount_path_template = Template(mount_path)
-        mount_path = mount_path_template.render(container=service_name, folder=folder)
+        mount_path = mount_path_template.render(container=service_name, folder=folder, app=config.get("app"))
 
     # Build final volume string
     result = f"{host_path}:{mount_path}"
@@ -479,6 +479,7 @@ def process_x_features(
         context = {
             "container": container_name,
             "index": template_counters[template_name],
+            "app": config.get("app"),
         }
 
         # Add contexts from previous templates
@@ -535,7 +536,7 @@ def process_x_features(
                 return 'true' if value else 'false'
             return value
 
-        env = Environment(finalize=finalize_value)
+        env = Environment(finalize=finalize_value, extensions=['jinja2.ext.do'])
         template_str = template_def.get("template", "")
         jinja_template = env.from_string(template_str)
         rendered = jinja_template.render(**context)
@@ -619,6 +620,7 @@ def render_label_templates(
         context = {
             "container": container_name,
             "index": template_counters[template_name],
+            "app": config.get("app"),
         }
 
         # Add contexts from previous templates
@@ -673,7 +675,7 @@ def render_label_templates(
                 return 'true' if value else 'false'
             return value
 
-        env = Environment(finalize=finalize_value)
+        env = Environment(finalize=finalize_value, extensions=['jinja2.ext.do'])
 
         jinja_template = env.from_string(template_str)
         rendered = jinja_template.render(**context)
@@ -807,6 +809,69 @@ def apply_common_container_config(service_config: dict[str, Any], common_config:
                 if merged_networks:
                     service_config[key] = merged_networks
 
+        elif key == "x-features":
+            # Merge x-features lists with intelligent merging
+            if isinstance(common_value, list):
+                if service_value is None:
+                    service_config[key] = common_value
+                elif isinstance(service_value, list):
+                    # Build a map of common features by name
+                    common_features = {}
+                    for feature_item in common_value:
+                        if isinstance(feature_item, dict) and len(feature_item) == 1:
+                            feature_name = list(feature_item.keys())[0]
+                            common_features[feature_name] = feature_item[feature_name]
+
+                    # Process service features
+                    merged_features = []
+                    service_feature_names = set()
+                    common_feature_usage = {}  # Track how many times each common feature is used
+
+                    for feature_item in service_value:
+                        if not isinstance(feature_item, dict) or len(feature_item) != 1:
+                            merged_features.append(feature_item)
+                            continue
+
+                        feature_name = list(feature_item.keys())[0]
+                        feature_value = feature_item[feature_name]
+
+                        # Track if this is a common feature
+                        if feature_name in common_features:
+                            if feature_name in common_feature_usage:
+                                # Error: common feature used multiple times in service
+                                from rich.console import Console
+                                console = Console()
+                                console.print(f"[red]Error:[/red] Feature '{feature_name}' from common config is used multiple times in service '{service_config.get('container_name', 'unknown')}'")
+                                console.print(f"  Common features can only be overridden once per service")
+                                raise ValueError(f"Duplicate common feature '{feature_name}' in service")
+
+                            common_feature_usage[feature_name] = True
+
+                            # Merge: service properties override common ones
+                            common_props = common_features[feature_name]
+                            if isinstance(common_props, dict) and isinstance(feature_value, dict):
+                                # Deep merge dicts
+                                merged_props = {**common_props, **feature_value}
+                                merged_features.append({feature_name: merged_props})
+                            elif feature_value is None and common_props is not None:
+                                # Service has empty feature, use common
+                                merged_features.append({feature_name: common_props})
+                            else:
+                                # Service value takes precedence
+                                merged_features.append(feature_item)
+                        else:
+                            # Not a common feature, keep as-is
+                            merged_features.append(feature_item)
+
+                        service_feature_names.add(feature_name)
+
+                    # Add common features that weren't used in service
+                    for feature_name, feature_value in common_features.items():
+                        if feature_name not in service_feature_names:
+                            merged_features.append({feature_name: feature_value})
+
+                    service_config[key] = merged_features
+
         elif isinstance(common_value, dict) and isinstance(service_value, dict):
             # For nested dicts (like logging), do a deep merge
             service_config[key] = deep_merge(common_value, service_value)
@@ -870,10 +935,15 @@ def replace_secrets(yaml_content: str, secrets_path: Path, redacted: bool = Fals
     return result
 
 
-def render_compose(template: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: str = None) -> dict[str, Any]:
     """Render the docker-compose template with boilerplate."""
     if "services" not in template:
         return template
+
+    # Add app name to config for use in templates
+    if app_name:
+        config = config.copy()
+        config["app"] = app_name
 
     # Get common container configuration
     common_container = config.get("common", {}).get("container", {})
@@ -1200,7 +1270,7 @@ def update(
             template = yaml.safe_load(preprocessed)
 
         render_config = load_config(config)
-        rendered = render_compose(template, render_config)
+        rendered = render_compose(template, render_config, app_name)
 
         # Save rendered file to apps/.state/rendered/<app_name>.yml
         rendered_dir = apps_dir / ".state" / "rendered"
@@ -1337,6 +1407,8 @@ def _render_single_file(
         output_dir = input_file.parent / ".state" / "rendered"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"{app_name}.yml"
+    else:
+        app_name = input_file.stem
 
     # Load files with preprocessing
     with open(input_file) as f:
@@ -1345,7 +1417,7 @@ def _render_single_file(
         template = yaml.safe_load(preprocessed)
 
     # Render template
-    rendered = render_compose(template, render_config)
+    rendered = render_compose(template, render_config, app_name)
 
     # Convert to YAML string
     rendered_yaml = yaml.dump(
