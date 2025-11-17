@@ -1,4 +1,4 @@
-# Dalboplex Infrastructure
+<img src="assets/dalboplex-full.svg" width="560">
 
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)

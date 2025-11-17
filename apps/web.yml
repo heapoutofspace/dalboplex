@@ -132,6 +132,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - @config:/app/config
+      - @images:/app/public/images
     x-features:
       - domain:
           subdomain: admin
@@ -148,6 +149,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - @config:/app/config
+      - /mnt/nvme/apps/homepage/images:/app/public/images
       - @media:/media:ro
     x-features:
       - domain:
