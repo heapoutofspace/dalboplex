@@ -25,6 +25,7 @@ services:
           description: Metrics aggregation
           weight: 50
       - widget:
+      - metrics:
 
   # Hard drive and SSD monitoring
   # https://github.com/AnalogJ/scrutiny
@@ -108,27 +109,42 @@ services:
           subdomain: glances
           port: 61208
       - homepage:
-          group: Monitoring
-          description: Resource monitoring
-          weight: 10
+          group: System
+          description: Resource usage
+          weight: 15
       - widget:
           version: 4
           metric: cpu
+      - uptime:
+          monitor: docker
 
-  # Glances Prometheus exporter for metrics collection
-  # https://nicolargo.github.io/glances/
-  glances-export:
-    image: nicolargo/glances:latest-full
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.processes'
     pid: host
-    environment:
-      - GLANCES_OPT=--export prometheus
-      - DOCKER_HOST=tcp://dockerproxy:2375
     volumes:
-      - /mnt/nvme/apps/glances/config:/etc/glances:ro
-      - /etc/os-release:/etc/os-release:ro
+      - '/:/host:ro,rslave'
     devices:
       - /dev/dri
-
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+      - /dev/sdg
+      - /dev/sdh
+      - /dev/sdi
+      - /dev/sdj
+      - /dev/nvme0
+      - /dev/nvme1
+      - /dev/nvme2
+      - /dev/nvme3
+    x-features:
+      - metrics:
+          port: 9100
 
   # Lightweight server and container monitoring
   # https://beszel.dev/
@@ -208,6 +224,7 @@ services:
       - widget:
           type: uptimekuma
           slug: all
+      - metrics:
 
   # Automatic Uptime Kuma monitor creation from Docker labels
   # https://github.com/BigBoot/AutoKuma
@@ -227,3 +244,28 @@ services:
       - kuma.discord.notification.name=Discord
       - kuma.discord.notification.active=true
       - 'kuma.discord.notification.config={"type": "discord", "discordWebhookUrl": "$UPTIME_KUMA_NOTIFICATION_URL"}'
+
+  # Metrics visualization and dashboarding
+  # https://grafana.com/
+  grafana:
+    image: grafana/grafana:latest
+    user: 1000:1000
+    volumes:
+      - @data:/var/lib/grafana
+    environment:
+      - GF_SERVER_ROOT_URL=https://grafana.dalboplex.ch
+      - GF_SECURITY_ADMIN_USER=simon@ceilingcat.ch
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-Auth-Request-Email
+      - GF_AUTH_PROXY_HEADER_PROPERTY=email
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      - GF_AUTH_PROXY_HEADERS=Email:X-Auth-Request-Email
+    x-features:
+      - domain:
+          subdomain: grafana
+          port: 3000
+      - homepage:
+          group: Monitoring
+          description: Metrics visualization
+          weight: 10

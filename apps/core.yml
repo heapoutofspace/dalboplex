@@ -37,10 +37,6 @@ services:
           group: System
           description: Container management
           weight: 30
-      - widget:
-          type: watchtower
-          url: http://watchtower:8080
-          key: $WATCHTOWER_HTTP_API_TOKEN
 
   # Automatic container updates
   # https://containrrr.dev/watchtower/
@@ -60,7 +56,8 @@ services:
   dockerproxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:latest
     environment:
-      - CONTAINERS=1 # Allow access to viewing containers
+      - CONTAINERS=1
+      - NETWORKS=1
       - POST=0 # Disallow any POST operations (effectively read-only)
     volumes:
       - @docker

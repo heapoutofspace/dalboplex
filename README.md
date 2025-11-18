@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-35+-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-36+-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -168,13 +168,14 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
 | [![Uptime Kuma](https://img.shields.io/badge/Uptime_Kuma-5CDD8B?logoColor=white)](https://github.com/louislam/uptime-kuma) | [uptime.dalboplex.ch](https://uptime.dalboplex.ch) | Service availability & alerts |
+| [![Grafana](https://img.shields.io/badge/Grafana-F46800?logo=grafana&logoColor=white)](https://grafana.com/) | [grafana.dalboplex.ch](https://grafana.dalboplex.ch) | Metrics visualization |
 | [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/) | [prometheus.dalboplex.ch](https://prometheus.dalboplex.ch) | Metrics collection |
 | [![Glances](https://img.shields.io/badge/Glances-3B82F6?logoColor=white)](https://github.com/nicolargo/glances) | [glances.dalboplex.ch](https://glances.dalboplex.ch) | System monitoring |
 | [![Scrutiny](https://img.shields.io/badge/Scrutiny-FF6B6B?logoColor=white)](https://github.com/AnalogJ/scrutiny) | [disks.dalboplex.ch](https://disks.dalboplex.ch) | Disk health |
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
 | [![Beszel](https://img.shields.io/badge/Beszel-10B981?logoColor=white)](https://beszel.dev/) | [beszel.dalboplex.ch](https://beszel.dalboplex.ch) | Container monitoring |
 
-**Total Services**: 35+ containers across 6 compose files
+**Total Services**: 36+ containers across 6 compose files
 
 ## Network & Security
 
@@ -281,6 +282,7 @@ graph TB
 ### Monitoring & Observability
 
 - **Service Availability**: Uptime Kuma tracks uptime and sends alerts with automatic monitor creation
+- **Metrics Visualization**: Grafana dashboards for Prometheus data
 - **Metrics Collection**: Prometheus with 90-day retention
 - **System Monitoring**: Glances provides real-time system metrics
 - **Disk Health**: Scrutiny monitors all storage devices (SMART)

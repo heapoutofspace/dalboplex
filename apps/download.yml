@@ -89,7 +89,7 @@ services:
   # Failed and stalled download handling
   # https://github.com/ManiMatter/decluttarr
   decluttarr:
-    image: ghcr.io/dalbothek/decluttarr:instance-job-config
+    image: ghcr.io/heapoutofspace/decluttarr:instance-job-config
     volumes:
       - @config:/app/config
       - @logs:/app/logs
@@ -117,11 +117,13 @@ services:
       - @media
     x-features:
       - homepage:
-           group: Download
-           description: Archive extraction
-           href: https://docker.dalboplex.ch/show?name=unpackerr
-           weight: 50
-           icon: https://unpackerr.zip/img/icon.png
+          group: Download
+          description: Archive extraction
+          href: https://docker.dalboplex.ch/show?name=unpackerr
+          weight: 50
+          icon: https://unpackerr.zip/img/icon.png
+      - metrics:
+          port: 5656
 #      - widget-prometheus:
 #          metrics:
 #            - label: Files extracted

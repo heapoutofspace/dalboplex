@@ -48,7 +48,7 @@ services:
       - widget:
           key: $PLEX_API_KEY
           fields: movies|tv
-      - monitoring:
+      - uptime:
           monitor: docker
 
 

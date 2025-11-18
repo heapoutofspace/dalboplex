@@ -12,7 +12,7 @@ common:
       options:
         max-size: "250m"
     x-features:
-      - monitoring:
+      - uptime:
 
   compose:
     networks:
@@ -154,12 +154,13 @@ labels:
       {{ render_dict('homepage.instance.%s.widget.metrics[%i]' % (instance, loop.index0), metric) }}
       {%- endfor %}
 
-  monitoring:
+  uptime:
     template: |
       {% set properties = {
         'name': homepage.name if homepage and homepage.name else container|replace('-', ' ')|title,
         'notification_names': '["discord"]',
-        'parent_name': app
+        'parent_name': app,
+        'max_retries': 5
       } %}
 
       {% if domain and not kwargs.pop('monitor', None) == 'docker' %}
@@ -179,3 +180,12 @@ labels:
       - kuma.{{ container }}_{{ monitor }}.{{ monitor }}.{{ key }}={{ value }}
       {% endfor %}
       - kuma.{{ app }}.group.name={{ app|capitalize }}
+
+  metrics:
+    args:
+      - port
+    defaults:
+      port: -1
+    template: |
+      {% if port == -1 %}{% set port = domain.port %}{% endif %}
+      - prometheus.address={{ container }}:{{ port }}
