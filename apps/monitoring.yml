@@ -219,8 +219,8 @@ services:
       - homepage:
           name: Uptime Kuma
           group: Monitoring
-          description: Service availability & alerts
-          weight: 20
+          description: Service availability
+          weight: 10
       - widget:
           type: uptimekuma
           slug: all
@@ -268,4 +268,4 @@ services:
       - homepage:
           group: Monitoring
           description: Metrics visualization
-          weight: 10
+          weight: 20

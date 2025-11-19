@@ -1230,36 +1230,26 @@ def status():
         raise typer.Exit(1)
 
 
-@app.command()
-def update(
-    app_name: str = typer.Argument(..., help="Name of the application to update"),
-    config: Path = typer.Option("apps/.config.yml", "--config", "-c", help="Render configuration file"),
-    apps_dir: Path = typer.Option("apps", "--apps-dir", help="Directory containing app definitions"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force update even if configuration hasn't changed"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Render and display the configuration without updating"),
-):
+def _update_single_app(
+    app_name: str,
+    config: Path,
+    apps_dir: Path,
+    force: bool,
+    dry_run: bool,
+    state: dict,
+    state_path: Path,
+) -> bool:
     """
-    Update a TrueNAS app by rendering and deploying its docker-compose configuration.
-
-    This command will:
-    1. Find the <app_name>.yml in apps/
-    2. Render it with the configured templates
-    3. Update the app in TrueNAS with the rendered configuration
-
-    Use --dry-run to preview the rendered configuration without making changes.
+    Update a single TrueNAS app. Returns True if successful, False otherwise.
     """
     if not dry_run:
         console.print(f"[blue]Updating app:[/blue] {app_name}")
-
-    # Load state file
-    state_path = apps_dir / ".state" / "state.yml"
-    state = load_state(state_path)
 
     # Check if compose file exists
     compose_file = apps_dir / f"{app_name}.yml"
     if not compose_file.exists():
         console.print(f"[red]Error:[/red] {app_name}.yml not found in {apps_dir}")
-        raise typer.Exit(1)
+        return False
 
     # Render the docker-compose file
     try:
@@ -1307,7 +1297,7 @@ def update(
             if dry_run:
                 console.print(f"[blue]Comparing with installed version[/blue]")
                 show_diff(installed_yaml, rendered_yaml, f"installed/{app_name}.yml", f"rendered/{app_name}.yml")
-                return
+                return True
             else:
                 # Show diff before updating (unless they're identical)
                 if installed_yaml != rendered_yaml:
@@ -1319,7 +1309,7 @@ def update(
                 console.print("[yellow]No installed version found - showing rendered config:[/yellow]\n")
                 syntax = Syntax(rendered_yaml, "yaml", theme="monokai", line_numbers=False)
                 console.print(syntax)
-                return
+                return True
             else:
                 console.print("[dim]No previous installation found[/dim]")
 
@@ -1329,7 +1319,7 @@ def update(
         # Check if configuration has changed (unless force flag is set)
         if not force and app_name in state and state[app_name].get("hash") == new_hash:
             console.print(f"[yellow]⊘[/yellow] No changes detected (use --force to update anyway)")
-            return
+            return True
 
         if force and app_name in state and state[app_name].get("hash") == new_hash:
             console.print(f"[yellow]⚠[/yellow] Forcing update (no changes detected)")
@@ -1358,7 +1348,7 @@ def update(
                     console.print(f"[green]✓[/green] Created '{app_name}'")
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to create app: {e}")
-                    raise typer.Exit(1)
+                    return False
             else:
                 # Update existing app
                 try:
@@ -1369,7 +1359,7 @@ def update(
                     console.print(f"[green]✓[/green] Updated '{app_name}'")
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to update app: {e}")
-                    raise typer.Exit(1)
+                    return False
 
             # Save the new hash to state file only after successful deployment
             if app_name not in state:
@@ -1383,14 +1373,116 @@ def update(
                 f.write(rendered_yaml)
             console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
 
+        return True
+
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] File not found: {e}")
-        raise typer.Exit(1)
+        return False
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         import traceback
         console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        return False
+
+
+@app.command()
+def update(
+    app_name: str = typer.Argument(None, help="Name of the application to update (omit when using --all)"),
+    config: Path = typer.Option("apps/.config.yml", "--config", "-c", help="Render configuration file"),
+    apps_dir: Path = typer.Option("apps", "--apps-dir", help="Directory containing app definitions"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force update even if configuration hasn't changed"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Render and display the configuration without updating"),
+    all_apps: bool = typer.Option(False, "--all", "-a", help="Update all apps"),
+):
+    """
+    Update a TrueNAS app by rendering and deploying its docker-compose configuration.
+
+    This command will:
+    1. Find the <app_name>.yml in apps/
+    2. Render it with the configured templates
+    3. Update the app in TrueNAS with the rendered configuration
+
+    Use --dry-run to preview the rendered configuration without making changes.
+    Use --all to update all apps in the apps directory.
+    """
+    # Validate arguments
+    if all_apps and app_name:
+        console.print("[red]Error:[/red] Cannot specify both app_name and --all")
         raise typer.Exit(1)
+
+    if not all_apps and not app_name:
+        console.print("[red]Error:[/red] Must specify either app_name or --all")
+        raise typer.Exit(1)
+
+    # Load state file
+    state_path = apps_dir / ".state" / "state.yml"
+    state = load_state(state_path)
+
+    if all_apps:
+        # Find all .yml files in apps directory
+        compose_files = sorted(apps_dir.glob("*.yml"))
+        # Filter out config and secrets files
+        app_files = [
+            f for f in compose_files
+            if f.name not in [".config.yml", ".secrets.yml"]
+        ]
+
+        if not app_files:
+            console.print(f"[yellow]No app files found in {apps_dir}[/yellow]")
+            raise typer.Exit(0)
+
+        # Extract app names
+        app_names = [f.stem for f in app_files]
+
+        console.print(f"[blue]Updating {len(app_names)} apps:[/blue] {', '.join(app_names)}\n")
+
+        # Track results
+        successful = []
+        failed = []
+
+        for app_name in app_names:
+            try:
+                success = _update_single_app(
+                    app_name=app_name,
+                    config=config,
+                    apps_dir=apps_dir,
+                    force=force,
+                    dry_run=dry_run,
+                    state=state,
+                    state_path=state_path,
+                )
+                if success:
+                    successful.append(app_name)
+                else:
+                    failed.append(app_name)
+            except Exception as e:
+                console.print(f"[red]Error updating {app_name}:[/red] {e}")
+                failed.append(app_name)
+
+            # Add spacing between apps
+            if app_name != app_names[-1]:
+                console.print()
+
+        # Print summary
+        console.print()
+        console.print("[blue]═" * 60 + "[/blue]")
+        console.print(f"[green]✓[/green] Successfully updated: {len(successful)}/{len(app_names)}")
+        if failed:
+            console.print(f"[red]✗[/red] Failed: {len(failed)}/{len(app_names)} ({', '.join(failed)})")
+            raise typer.Exit(1)
+    else:
+        # Update single app
+        success = _update_single_app(
+            app_name=app_name,
+            config=config,
+            apps_dir=apps_dir,
+            force=force,
+            dry_run=dry_run,
+            state=state,
+            state_path=state_path,
+        )
+        if not success:
+            raise typer.Exit(1)
 
 
 def _render_single_file(
