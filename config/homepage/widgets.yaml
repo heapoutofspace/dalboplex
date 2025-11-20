@@ -1,0 +1,16 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/info-widgets/
+
+- logo:
+    icon: /images/dalboplex-full-light.svg
+
+- resources:
+    cpu: true
+    cputemp: true
+    tempmin: 25
+    tempmax: 95
+    units: metric
+    memory: true
+    expanded: false
+    disk: /

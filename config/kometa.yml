@@ -1,0 +1,276 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kometa-team/kometa/nightly/json-schema/config-schema.json
+## Do not remove the above line
+
+## Plex and TMDb are the two connections which are required for the script to run
+
+plex:                              # Can be individually specified per library as well; REQUIRED for the script to run
+  url: http://plex:32400           # Enter Plex URL (REQUIRED); this needs to point to your server, not app.plex.tv
+  token: <TODO>                    # Enter Plex Token (REQUIRED)
+  timeout: 60
+  db_cache: 40
+  clean_bundles: false
+  empty_trash: false
+  optimize: false
+  verify_ssl: true
+
+tmdb:
+  apikey: <TODO>
+  cache_expiration: 60
+  language: en
+  region:
+
+
+libraries:
+  Movies:
+    #operations:
+    #  delete_collections:
+    #    configured: false
+    #    managed: true
+
+    template_variables:
+      use_separator: false
+      sort_prefix: ZZZ
+      visible_home: false
+      visible_library: false
+      visible_shared: false
+
+    collection_files:
+      - default: genre
+        template_variables:
+          minimum_items: 10
+          visible_library: true
+
+      - default: imdb
+        template_variables:
+          use_lowest: false
+          visible_library: true
+          name_popular: Popular Movies
+
+      - default: based
+        template_variables:
+          visible_library_true_story: true
+
+      - default: universe
+        template_variables:
+          minimum_items: 3
+          visible_library_wizard: true
+          exclude:
+            - avp
+            - conjuring
+            - marvel
+
+      - default: franchise
+        template_variables:
+          minimum_items: 3
+
+      - default: director
+        template_variables:
+          minimum_items: 5
+          visible_library_Edgar Wright: true
+          data:
+            limit: 15
+
+      - default: actor
+        template_variables:
+          minimum_items: 3
+          data:
+            limit: 30
+
+      - default: seasonal
+        template_variables:
+          use_all: false
+          use_christmas: true
+          use_black_history: true
+          use_easter: true
+          use_lgbtq: true
+          use_years: true
+          use_valentine: true
+          use_women: true
+          visible_home: true
+          visible_library: true
+          visible_shared: true
+
+      - default: decade
+        template_variables:
+          minimum_items: 5
+          visible_library_1990: true
+
+      - default: studio
+        template_variables:
+          minimum_items: 5
+          visible_library_Pixar: true
+
+      - default: oscars
+        template_variables:
+          use_year_collections: false
+          visible_library_best_picture: true
+
+      - default: audio_language
+        template_variables:
+          use_other: false
+          visible_library: true
+          include:
+            - de
+
+#      - file: /config/collections.yml
+
+    overlay_files:
+      - default: ribbon
+        template_variables:
+          style: black
+          use_all: false
+          use_oscars: true
+          use_imdb: true
+
+      - default: resolution
+        template_variables:
+          use_1080p_dvhdrplus: false
+          use_1080p_dvhdr: false
+          use_1080p_plus: false
+          use_1080p_dv: false
+          use_1080p_hdr: false
+          use_1080p: false
+          use_720p_dvhdrplus: false
+          use_720p_dvhdr: false
+          use_720p_plus: false
+          use_720p_dv: false
+          use_720p_hdr: false
+          use_720p: false
+          use_576p_dvhdrplus: false
+          use_576p_dvhdr: false
+          use_576p_plus: false
+          use_576p_dv: false
+          use_576p_hdr: false
+          use_576p: false
+          use_480p_dvhdrplus: false
+          use_480p_dvhdr: false
+          use_480p_plus: false
+          use_480p_dv: false
+          use_480p_hdr: false
+          use_480p: false
+
+      - default: languages
+        template_variables:
+          languages:
+            - de
+          hide_text: true
+          vertical_position: bottom
+          vertical_align: bottom
+          initial_vertical_align: bottom
+
+  TV Shows:
+    #operations:
+    #  delete_collections:
+    #    configured: false
+    #    managed: true
+
+    template_variables:
+      use_separator: false
+      sort_prefix: ZZZ
+      visible_home: false
+      visible_library: false
+      visible_shared: false
+
+    collection_files:
+      - default: genre
+        template_variables:
+          minimum_items: 5
+          visible_library: true
+
+      - default: decade
+        template_variables:
+          minimum_items: 5
+          visible_library_1990: true
+          visible_library_2000: true
+          visible_library_2010: true
+          visible_library_2020: true
+
+      - default: actor
+        template_variables:
+          minimum_items: 5
+          data:
+            limit: 30
+
+    overlay_files:
+      - default: status
+        template_variables:
+          use_returning: false
+          use_airing: false
+          horizontal_align: left
+          vertical_align: top
+      - default: episode_info
+        template_variables:
+          builder_level: episode
+          horizontal_align: right
+          vertical_align: bottom
+      - default: languages
+        template_variables:
+          builder_level: season
+          languages:
+            - de
+          hide_text: true
+          vertical_position: bottom
+          vertical_align: bottom
+          initial_vertical_align: bottom
+
+settings:
+  run_order:
+    - operations
+    - metadata
+    - collections
+    - overlays
+  cache: true
+  cache_expiration: 60
+  asset_directory:
+  asset_folders: true
+  asset_depth: 0
+  create_asset_folders: false
+  prioritize_assets: false
+  dimensional_asset_rename: false
+  download_url_assets: false
+  show_missing_assets: true
+  show_missing_season_assets: false
+  show_missing_episode_assets: false
+  show_asset_not_needed: true
+  sync_mode: append
+  default_collection_order:
+  minimum_items: 1
+  item_refresh_delay: 0
+  delete_below_minimum: false
+  delete_not_scheduled: false
+  run_again_delay: 0
+  missing_only_released: false
+  only_filter_missing: false
+  show_unmanaged: true
+  show_unconfigured: true
+  show_filtered: false
+  show_unfiltered: false
+  show_options: false
+  show_missing: true
+  save_report: false
+  tvdb_language: default
+  ignore_ids:
+  ignore_imdb_ids:
+  playlist_sync_to_users:
+  playlist_exclude_users:
+  playlist_report: true
+  custom_repo:
+  overlay_artwork_filetype: webp_lossy
+  overlay_artwork_quality: 90
+
+radarr:
+  url: http://radarr:7878
+  token: <TODO>
+  add_missing: false
+  add_existing: false
+  upgrade_existing: false
+  monitor_existing: false
+  root_folder_path: "/media/movies"    # This value is CASE SENSITIVE
+  monitor: true
+  availability: released
+  quality_profile: English        # This value is CASE SENSITIVE
+  tag: kometa
+  search: false
+  radarr_path:                    # This value is only needed in combination with the *_existing settings
+  plex_path:                      # This value is only needed in combination with the *_existing settings
+  ignore_cache: false

@@ -1,0 +1,62 @@
+general:
+  log_level: INFO
+  test_run: false
+  timer: 10
+  ignored_download_clients: []
+  # ssl_verification: false # Optional: Defaults to true
+  private_tracker_handling: "obsolete_tag" # remove, skip, obsolete_tag. Optional. Default: remove
+  public_tracker_handling: "remove"  # remove, skip, obsolete_tag. Optional. Default: remove
+  obsolete_tag: "obsolete" # optional. Default: "Obsolete"
+  protected_tag: "keep" # optional. Default: "Keep"
+
+job_defaults:
+  max_strikes: 3
+  min_days_between_searches: 7
+  max_concurrent_searches: 3
+
+jobs:
+  remove_bad_files: false
+  remove_done_seeding: false
+  remove_failed_downloads: true
+  remove_failed_imports:
+    message_patterns:
+      - "Not a Custom Format upgrade for existing*"
+      - "Not an upgrade for existing*"
+      - "*Found potentially dangerous file with extension*"
+      - "Invalid video file*"
+      - "No files found are eligible for import*"
+      - "One or more episodes expected in this release were not imported or missing from the release"
+  remove_metadata_missing: true
+  remove_missing_files: true
+  remove_orphans: true
+  remove_slow: false
+  remove_stalled: true
+  remove_unmonitored: false
+  search_unmet_cutoff:
+    min_days_between_searches: 14
+    max_concurrent_searches: 1
+  search_missing:
+    min_days_between_searches: 7
+    max_concurrent_searches: 3
+  detect_deletions: false
+
+instances:
+  sonarr:
+    - base_url: "http://sonarr:8989"
+      api_key: "<TODO>"
+      jobs:
+        search_unmet_cutoff: false
+  radarr:
+    - base_url: "http://radarr:7878"
+      api_key: "<TODO>"
+
+download_clients:
+  qbittorrent:
+    - base_url: "http://qbittorrent" # You can use decluttarr without qbit (not all features available, see readme).
+      username: "admin" # (optional -> if not provided, assuming not needed)
+      password: "<TODO>" # (optional -> if not provided, assuming not needed)
+      name: "qBittorrent" # (optional -> if not provided, assuming "qBittorrent". Must correspond with what is specified in your *arr as download client name)
+  sabnzbd:
+    - base_url: "http://sabnzbd:8080" # SABnzbd server URL
+      api_key: "<TODO>" # (required -> SABnzbd API key)
+      name: "SABnzbd" # (optional -> if not provided, assuming "SABnzbd". Must correspond with what is specified in your *arr as download client name)

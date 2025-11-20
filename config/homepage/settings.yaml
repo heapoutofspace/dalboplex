@@ -1,0 +1,29 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/settings/
+
+title: dalboplex
+base: https://admin.dalboplex.ch
+instanceName: private
+
+color: slate
+theme: dark
+statusStyle: basic
+iconStyle: theme
+favicon: /images/dalboplex-responsive.svg
+
+quicklaunch:
+  searchDescriptions: true
+  hideInternetSearch: true
+
+layout:
+  Media:
+    style: row
+    columns: 2
+    MediaPrimary:
+        header: false
+    MediaSecondary:
+        header: false
+  System: 
+  Monitoring:
+  Download: 

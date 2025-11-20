@@ -1,0 +1,24 @@
+/* Align resource usage to the bottom right */
+#information-widgets-right {
+    display: none;
+}
+#information-widgets .widget-container {
+    align-self: flex-end;
+}
+
+/* Allow wide logo */
+.information-widget-logo img {
+    width: auto !important;
+}
+
+/* Limit number of downloads shown */
+.service-card div:nth-child(n+6 of .text-theme-700) {
+    display: none;
+}
+
+/* Hide resource usage on mobile */
+@media not all and (min-width: 64rem) {
+  .information-widget-resource {
+      display: none;
+  }
+}

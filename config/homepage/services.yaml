@@ -1,0 +1,14 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/services/
+
+- System:
+  - TrueNAS:
+      description: Operating system
+      href: https://truenas.dalboplex.ch
+      icon: truenas.png
+      widget:
+          type: truenas
+          url: http://host.docker.internal
+          key: <TODO>
+          enablePools: true

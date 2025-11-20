@@ -1,0 +1,22 @@
+server:
+  externalUrl: https://files.dalboplex.ch
+  sources:
+    - path: /mnt/apps
+      config:
+        defaultEnabled: true
+        defaultUserScope: "/"
+    - path: /mnt/media
+      config:
+        defaultEnabled: true
+        defaultUserScope: "/"
+    - path: /mnt/downloads
+      config:
+        defaultEnabled: true
+        defaultUserScope: "/"
+auth:
+  adminUsername: simon
+  methods:
+    proxy:
+      enabled: true
+      header: "X-Auth-Request-Preferred-Username"  # or "Remote-User"
+      createUser: true
