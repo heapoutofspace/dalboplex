@@ -43,12 +43,20 @@ labels:
     defaults:
       port: 80
       public: false
+      group: dalboplex
     template: |
       - traefik.enable=true
       - traefik.http.routers.{{ container }}.rule=Host(`{% if subdomain != '@' %}{{ subdomain }}.{% endif %}dalboplex.ch`)
       - traefik.http.routers.{{ container }}.service={{ service or container }}
       - @_tls({{ container }})
-      {% if not public %}- traefik.http.routers.{{ container }}.middlewares=oauth2-proxy{% endif %}
+      {% if not public %}
+        {% if group == 'dalboplex' %}
+      - traefik.http.routers.{{ container }}.middlewares=oauth2-proxy
+        {% else %}
+      - @_group_middleware({{ group }})
+      - traefik.http.routers.{{ container }}.middlewares=oauth2-group-{{ group }}
+        {% endif %}
+      {% endif %}
       {% if not service %}- traefik.http.services.{{ container }}.loadbalancer.server.port={{ port }}{% endif %}
       - @_redirect({{ subdomain }}, alias={{ container }}{% if alias %}, custom_alias={{ alias }}{% endif %})
 
@@ -56,12 +64,22 @@ labels:
     args:
       - subdomain
       - target
+    defaults:
+      public: false
+      group: dalboplex
     template: |
       - traefik.enable=true
       - traefik.http.routers.{{ subdomain }}.rule=Host(`{{ subdomain }}.dalboplex.ch`)
       - traefik.http.routers.{{ subdomain }}.service={{ subdomain }}
       - @_tls({{ subdomain }})
-      {% if not public %}- traefik.http.routers.{{ subdomain }}.middlewares=oauth2-proxy{% endif %}
+      {% if not public %}
+        {%- if group == 'dalboplex' %}
+      - traefik.http.routers.{{ subdomain }}.middlewares=oauth2-proxy
+        {%- else %}
+      - @_group_middleware({{ group }})
+      - traefik.http.routers.{{ subdomain }}.middlewares=oauth2-group-{{ group }}
+        {%- endif %}
+      {%- endif %}
       - traefik.http.services.{{ subdomain }}.loadbalancer.server.url={{ target }}
       - @_redirect({{ subdomain }}{% if alias %}, alias={{ alias }}{% endif %})
 
@@ -73,6 +91,14 @@ labels:
       - traefik.http.routers.{{ router }}.tls.certresolver=letsencrypt
       - traefik.http.routers.{{ router }}.tls.domains[0].main=dalboplex.ch
       - traefik.http.routers.{{ router }}.tls.domains[0].sans=*.dalboplex.ch, dplx.ch, *.dplx.ch
+
+  _group_middleware:
+    args:
+      - group
+    template: |
+      - traefik.http.middlewares.oauth2-group-{{ group }}.forwardauth.address=http://oauth2-proxy:4180?allowed_groups={{ group }}
+      - traefik.http.middlewares.oauth2-group-{{ group }}.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.oauth2-group-{{ group }}.forwardauth.authResponseHeaders=X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups,X-Auth-Request-Preferred-Username,X-Auth-Request-Access-Token,X-Forwarded-User
 
   _redirect:
     args:
