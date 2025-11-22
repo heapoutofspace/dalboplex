@@ -1140,6 +1140,145 @@ def get_truenas_client() -> Client:
     return client
 
 
+def get_app_lifecycle_logs(client: Client, app_name: str, lines: int = 50, start_time: float = None) -> str:
+    """
+    Read the last N lines from /var/log/app_lifecycle.log on TrueNAS using core.download.
+    Returns the last N lines from the log file, formatted for readability.
+
+    Args:
+        client: TrueNAS API client
+        app_name: Name of the app to get logs for
+        lines: Maximum number of lines to return
+        start_time: Optional Unix timestamp - only return logs newer than this time
+    """
+    try:
+        log_path = "/var/log/app_lifecycle.log"
+
+        # Use core.download with filesystem.get to download the file
+        # This returns a tuple: [job_id, download_url_path]
+        result = client.call("core.download", "filesystem.get", [log_path], f"{app_name}_lifecycle.log")
+
+        if isinstance(result, (list, tuple)) and len(result) >= 2:
+            download_url = result[1]
+
+            # Make HTTP request to download the file content
+            import urllib.request
+            from datetime import datetime
+            config = load_truenas_config()
+            host = config["host"]
+
+            # Build full URL - host already includes http:// or https://
+            full_url = f"{host}{download_url}"
+
+            # Fetch the content
+            with urllib.request.urlopen(full_url, timeout=10) as response:
+                content = response.read().decode('utf-8')
+
+                # Get last N lines
+                all_lines = content.split('\n')
+                recent_lines = all_lines[-lines:]
+
+                # Filter and format lines
+                formatted_lines = []
+                for line in recent_lines:
+                    if not line.strip():
+                        continue
+
+                    # Parse timestamp from log line: [2025/11/22 11:03:03]
+                    if line.startswith('[') and ']' in line:
+                        timestamp_str = line[1:line.index(']')]
+                        try:
+                            # Parse timestamp: 2025/11/22 11:03:03
+                            log_time = datetime.strptime(timestamp_str, '%Y/%m/%d %H:%M:%S')
+                            log_timestamp = log_time.timestamp()
+
+                            # Skip if older than start_time
+                            if start_time and log_timestamp < start_time:
+                                continue
+                        except ValueError:
+                            pass  # Couldn't parse timestamp, include line anyway
+
+                    # Parse structured log message
+                    # Format: [timestamp] (LEVEL) module.function():line - message
+                    if ' - ' in line:
+                        parts = line.split(' - ', 1)
+                        header = parts[0]
+                        message = parts[1] if len(parts) > 1 else ''
+
+                        # Check if message contains escaped newlines
+                        if '\\n' in message:
+                            # Replace escaped newlines with actual newlines and indent continuation lines
+                            lines_in_msg = message.split('\\n')
+                            formatted_lines.append(header + ' - ' + lines_in_msg[0])
+                            for continuation in lines_in_msg[1:]:
+                                if continuation.strip():  # Skip empty lines
+                                    formatted_lines.append('  ' + continuation)
+                            continue
+
+                    # Default: just add the line as-is
+                    formatted_lines.append(line)
+
+                return '\n'.join(formatted_lines)
+
+        return ""
+    except Exception as e:
+        return ""
+
+
+def get_app_error_info(client: Client, app: dict) -> str:
+    """
+    Get error information for a failed app deployment.
+    Checks the app's container status, metadata, notes, and lifecycle logs.
+    """
+    try:
+        error_info = []
+
+        # Validate we have a dict
+        if not isinstance(app, dict):
+            return f"Invalid app data (type: {type(app).__name__})"
+
+        app_name = app.get("name", "unknown")
+
+        # Check notes field which often contains error messages
+        if app.get("notes"):
+            notes = app["notes"]
+            if notes and notes.strip():
+                error_info.append(f"Notes: {notes}")
+
+        # Check container states if available
+        # active_workloads is a dict with keys: containers, container_details, etc.
+        if app.get("active_workloads") and isinstance(app["active_workloads"], dict):
+            aw = app["active_workloads"]
+            container_details = aw.get("container_details", [])
+
+            if container_details:
+                for container in container_details:
+                    if not isinstance(container, dict):
+                        continue
+                    state = container.get("state", "unknown")
+                    name = container.get("service_name") or container.get("id", "unknown")
+                    if state != "running":
+                        error_info.append(f"Container {name}: {state}")
+                        if container.get("exit_code"):
+                            error_info.append(f"  Exit code: {container['exit_code']}")
+                        if container.get("error"):
+                            error_info.append(f"  Error: {container['error']}")
+            elif app.get("state") == "STOPPED":
+                # No containers running, likely a startup failure
+                error_info.append("No containers started - likely a configuration or image error")
+
+        # Fetch lifecycle logs for more details
+        logs = get_app_lifecycle_logs(client, app_name, lines=50)
+        if logs:
+            error_info.append("\nRecent logs from /var/log/app_lifecycle.log:")
+            error_info.append(logs)
+
+        return "\n".join(error_info) if error_info else "No detailed error information available"
+    except Exception as e:
+        import traceback
+        return f"Could not fetch error details: {e}\n{traceback.format_exc()}"
+
+
 @app.command()
 def login(
     host: str = typer.Option(..., "--host", "-h", prompt=True, help="TrueNAS host (e.g., truenas.local or https://truenas.local)"),
@@ -1232,10 +1371,12 @@ def status():
                 state = app.get("state", "unknown")
                 version = app.get("version", "N/A")
 
-                # Get active workload count
+                # Get active workload count (number of containers)
                 active_workloads = 0
-                if app.get("active_workloads"):
-                    active_workloads = len(app["active_workloads"])
+                if app.get("active_workloads") and isinstance(app["active_workloads"], dict):
+                    container_details = app["active_workloads"].get("container_details", [])
+                    if isinstance(container_details, list):
+                        active_workloads = len(container_details)
 
                 # Color code the state
                 state_lower = state.lower()
@@ -1314,6 +1455,11 @@ def _update_single_app(
         # Convert rendered config to YAML string for TrueNAS
         rendered_yaml = yaml.dump(rendered, Dumper=NoAliasDumper, default_flow_style=False, sort_keys=False, allow_unicode=True, width=1000)
 
+        # Remove version line to avoid Docker Compose warnings
+        # We keep it in source for editor recognition, but remove it for deployment
+        lines = rendered_yaml.split('\n')
+        rendered_yaml = '\n'.join(line for line in lines if not line.startswith('version:'))
+
         # Replace secrets from .secrets.yml
         secrets_path = apps_dir / ".secrets.yml"
         rendered_yaml = replace_secrets(rendered_yaml, secrets_path)
@@ -1368,6 +1514,8 @@ def _update_single_app(
 
             if not app_exists:
                 # Create new app
+                import time
+                start_time = time.time()
                 try:
                     create_data = {
                         "custom_app": True,
@@ -1376,34 +1524,174 @@ def _update_single_app(
                         "train": "stable",
                         "custom_compose_config_string": rendered_yaml,
                     }
-                    result = client.call("app.create", create_data)
-                    console.print(f"[green]✓[/green] Created '{app_name}'")
+                    job_id = client.call("app.create", create_data)
+                    console.print(f"[green]✓[/green] Submitted creation of '{app_name}'")
+
+                    # Save the rendered file with secrets to installed directory immediately
+                    # This ensures our local state matches what was sent to TrueNAS
+                    installed_dir.mkdir(parents=True, exist_ok=True)
+                    with open(installed_file, "w") as f:
+                        f.write(rendered_yaml)
+
+                    # Wait for create job to complete and check result
+                    console.print(f"[dim]Waiting for creation job to complete...[/dim]")
+
+                    # Poll the job until it reaches a terminal state
+                    max_wait = 300  # 5 minutes
+                    poll_start = time.time()
+
+                    while time.time() - poll_start < max_wait:
+                        jobs = client.call("core.get_jobs", [["id", "=", job_id]])
+                        if jobs:
+                            job = jobs[0]
+                            job_state = job.get("state")
+
+                            # Terminal states
+                            if job_state in ["SUCCESS", "FAILED", "ABORTED"]:
+                                break
+
+                        time.sleep(2)
+
+                    # Check final job state
+                    if jobs:
+                        job = jobs[0]
+                        job_state = job.get("state")
+
+                        if job_state != "SUCCESS":
+                            # Job failed or didn't complete successfully
+                            error = job.get("error") or job.get("exception") or f"Job ended in state: {job_state}"
+                            console.print(f"[red]✗[/red] Creation job failed: {error}")
+
+                            # Get lifecycle logs for more details (only newer than start_time)
+                            logs = get_app_lifecycle_logs(client, app_name, lines=30, start_time=start_time)
+                            if logs:
+                                console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
+                            return False
+
+                    # Success - update hash
+                    if app_name not in state:
+                        state[app_name] = {}
+                    state[app_name]["hash"] = new_hash
+                    save_state(state_path, state)
+
+                    console.print(f"[green]✓[/green] '{app_name}' created successfully")
+                    console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
+
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to create app: {e}")
+                    # Try to get logs even on API error (only newer than start_time)
+                    logs = get_app_lifecycle_logs(client, app_name, lines=20, start_time=start_time)
+                    if logs:
+                        console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
                     return False
             else:
                 # Update existing app
+                import time
+                start_time = time.time()
                 try:
+                    # Record whether app was running before
+                    app_before = apps[0]
+                    was_running = app_before.get("state") == "RUNNING"
+
+                    # Update the app
                     update_data = {
                         "custom_compose_config_string": rendered_yaml,
                     }
-                    result = client.call("app.update", app_name, update_data)
-                    console.print(f"[green]✓[/green] Updated '{app_name}'")
+                    job_id = client.call("app.update", app_name, update_data)
+                    console.print(f"[green]✓[/green] Submitted update of '{app_name}'")
+
+                    # Save the rendered file with secrets to installed directory immediately
+                    # This ensures our local state matches what was sent to TrueNAS
+                    installed_dir.mkdir(parents=True, exist_ok=True)
+                    with open(installed_file, "w") as f:
+                        f.write(rendered_yaml)
+
+                    # Wait for update job to complete and check result
+                    console.print(f"[dim]Waiting for update job to complete...[/dim]")
+
+                    # Poll the job until it reaches a terminal state
+                    max_wait = 300  # 5 minutes
+                    poll_start = time.time()
+
+                    while time.time() - poll_start < max_wait:
+                        jobs = client.call("core.get_jobs", [["id", "=", job_id]])
+                        if jobs:
+                            job = jobs[0]
+                            job_state = job.get("state")
+
+                            # Terminal states
+                            if job_state in ["SUCCESS", "FAILED", "ABORTED"]:
+                                break
+
+                        time.sleep(2)
+
+                    # Check final job state
+                    if jobs:
+                        job = jobs[0]
+                        job_state = job.get("state")
+
+                        if job_state != "SUCCESS":
+                            # Job failed or didn't complete successfully
+                            error = job.get("error") or job.get("exception") or f"Job ended in state: {job_state}"
+                            console.print(f"[red]✗[/red] Update job failed: {error}")
+
+                            # Get lifecycle logs for more details (only newer than start_time)
+                            logs = get_app_lifecycle_logs(client, app_name, lines=30, start_time=start_time)
+                            if logs:
+                                console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
+                            return False
+
+                    # If app wasn't running before, start it
+                    if not was_running:
+                        console.print(f"[dim]Starting app...[/dim]")
+                        start_job_id = client.call("app.start", app_name)
+
+                        # Poll the start job until it reaches a terminal state
+                        poll_start = time.time()
+
+                        while time.time() - poll_start < max_wait:
+                            start_jobs = client.call("core.get_jobs", [["id", "=", start_job_id]])
+                            if start_jobs:
+                                start_job = start_jobs[0]
+                                start_state = start_job.get("state")
+
+                                # Terminal states
+                                if start_state in ["SUCCESS", "FAILED", "ABORTED"]:
+                                    break
+
+                            time.sleep(2)
+
+                        # Check final start job state
+                        if start_jobs:
+                            start_job = start_jobs[0]
+                            start_state = start_job.get("state")
+
+                            if start_state != "SUCCESS":
+                                error = start_job.get("error") or start_job.get("exception") or f"Job ended in state: {start_state}"
+                                console.print(f"[red]✗[/red] Start job failed: {error}")
+
+                                # Get lifecycle logs for more details (only newer than start_time)
+                                logs = get_app_lifecycle_logs(client, app_name, lines=30, start_time=start_time)
+                                if logs:
+                                    console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
+                                return False
+
+                    # Success - update hash
+                    if app_name not in state:
+                        state[app_name] = {}
+                    state[app_name]["hash"] = new_hash
+                    save_state(state_path, state)
+
+                    console.print(f"[green]✓[/green] '{app_name}' updated successfully")
+                    console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
+
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to update app: {e}")
+                    # Try to get logs even on API error (only newer than start_time)
+                    logs = get_app_lifecycle_logs(client, app_name, lines=20, start_time=start_time)
+                    if logs:
+                        console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
                     return False
-
-            # Save the new hash to state file only after successful deployment
-            if app_name not in state:
-                state[app_name] = {}
-            state[app_name]["hash"] = new_hash
-            save_state(state_path, state)
-
-            # Save the rendered file with secrets to installed directory
-            installed_dir.mkdir(parents=True, exist_ok=True)
-            with open(installed_file, "w") as f:
-                f.write(rendered_yaml)
-            console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
 
         return True
 
@@ -1552,6 +1840,10 @@ def _render_single_file(
         allow_unicode=True,
         width=1000,  # Prevent line wrapping
     )
+
+    # Remove version line to avoid Docker Compose warnings
+    lines = rendered_yaml.split('\n')
+    rendered_yaml = '\n'.join(line for line in lines if not line.startswith('version:'))
 
     # Replace secrets from .secrets.yml
     secrets_path = input_file.parent / ".secrets.yml"
