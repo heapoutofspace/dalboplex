@@ -111,7 +111,7 @@ services:
       - homepage:
           group: System
           description: Resource usage
-          weight: 15
+          weight: 35
       - widget:
           version: 4
           metric: cpu

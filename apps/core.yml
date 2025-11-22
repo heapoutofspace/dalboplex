@@ -45,11 +45,18 @@ services:
     user: 1000:999
     environment:
       - WATCHTOWER_SCHEDULE=0 0 5 * * *
+      - WATCHTOWER_ROLLING_RESTART=true
       - WATCHTOWER_NOTIFICATION_URL=$WATCHTOWER_NOTIFICATION_URL
+      - WATCHTOWER_WARN_ON_HEAD_FAILURE=false
       - WATCHTOWER_HTTP_API_METRICS=true
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
       - WATCHTOWER_HTTP_API_TOKEN=$WATCHTOWER_HTTP_API_TOKEN
     volumes:
       - @docker
+      - @config.json:ro
+    x-features:
+      - disable-watchtower:
 
   # Docker socket proxy for security
   # https://github.com/Tecnativa/docker-socket-proxy

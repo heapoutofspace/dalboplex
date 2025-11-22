@@ -215,3 +215,7 @@ labels:
     template: |
       {% if port == -1 %}{% set port = domain.port %}{% endif %}
       - prometheus.address={{ container }}:{{ port }}
+
+  disable-watchtower:
+    template: |
+      - com.centurylinklabs.watchtower.enable=false
