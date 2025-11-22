@@ -18,6 +18,21 @@ services:
           subdomain: restic
           port: 9898
       - homepage:
-          group: System
+          group: Jobs
           description: Restic backups
-          weight: 100
+          weight: 20
+
+  olivetin:
+    image: jamesread/olivetin:latest
+    user: 1000:999
+    volumes:
+      - @config
+      - @docker
+    x-features:
+      - domain:
+          subdomain: olivetin
+          port: 1337
+      - homepage:
+          group: Jobs
+          description: Interactive tasks
+          weight: 10
