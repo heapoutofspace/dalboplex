@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-36+-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-39+-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -161,6 +161,16 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Filebrowser](https://img.shields.io/badge/Filebrowser-3B82F6?logoColor=white)](https://github.com/gtsteffaniak/filebrowser) | [files.dalboplex.ch](https://files.dalboplex.ch) | File manager |
 | [![Docker Proxy](https://img.shields.io/badge/Docker_Proxy-2496ED?logo=docker&logoColor=white)](https://github.com/Tecnativa/docker-socket-proxy) | - | Socket proxy |
 
+### Applications
+
+**Compose file**: [owlmend.yml](apps/owlmend.yml)
+
+| Application | Subdomain | Purpose |
+|-------------|-----------|---------|
+| [![Owlmend](https://img.shields.io/badge/Owlmend-5865F2?logoColor=white)](https://github.com/heapoutofspace/owlmend) | [owlmend.dalboplex.ch](https://owlmend.dalboplex.ch) | Owlmend application |
+| [![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/) | - | Database |
+| [![Mongo Express](https://img.shields.io/badge/Mongo_Express-13AA52?logoColor=white)](https://github.com/mongo-express/mongo-express) | [mongo.dalboplex.ch](https://mongo.dalboplex.ch) | MongoDB admin UI |
+
 ### Monitoring & Metrics
 
 **Compose file**: [monitoring.yml](apps/monitoring.yml)
@@ -175,7 +185,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
 | [![Beszel](https://img.shields.io/badge/Beszel-10B981?logoColor=white)](https://beszel.dev/) | [beszel.dalboplex.ch](https://beszel.dalboplex.ch) | Container monitoring |
 
-**Total Services**: 36+ containers across 6 compose files
+**Total Services**: 39+ containers across 7 compose files
 
 ## Network & Security
 

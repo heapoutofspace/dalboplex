@@ -1,0 +1,64 @@
+version: '3.7'
+services:
+  # Owlmend application
+  # https://github.com/heapoutofspace/owlmend
+  owlmend:
+    image: ghcr.io/heapoutofspace/owlmend:latest
+    user: 1000:1000
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_USERNAME=owlmend
+      - MONGODB_PASSWORD=$MONGODB_OWLMEND_PASSWORD
+    volumes:
+      - @data
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    x-features:
+      - domain:
+          subdomain: owlmend
+          port: 8080
+          group: owlmend
+      - homepage:
+          group: Apps
+          description: Medical study tool
+          weight: 10
+
+  # MongoDB database
+  # https://hub.docker.com/_/mongo
+  mongodb:
+    image: mongo:7
+    user: 1000:1000
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=$MONGODB_ROOT_USERNAME
+      - MONGO_INITDB_ROOT_PASSWORD=$MONGODB_ROOT_PASSWORD
+    volumes:
+      - @data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MongoDB web UI
+  # https://github.com/mongo-express/mongo-express
+  mongo-express:
+    image: mongo-express:latest
+    user: 1000:1000
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongodb
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=$MONGODB_ROOT_USERNAME
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=$MONGODB_ROOT_PASSWORD
+      - ME_CONFIG_BASICAUTH=false
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    x-features:
+      - domain:
+          subdomain: mongo
+          port: 8081
+      - homepage:
+          group: Apps
+          description: MongoDB admin UI
+          weight: 11
