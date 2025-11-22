@@ -129,50 +129,10 @@ def show_diff(old_content: str, new_content: str, old_label: str = "installed", 
         console.print("[dim]No differences found[/dim]")
 
 
-def extract_default_volume_dirs(rendered_config: dict[str, Any], render_config: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Extract directories that use the default volume mapping from rendered config.
-    Returns a list of dicts with path, uid, gid, mode.
-    """
-    if "volumes" not in render_config or "default" not in render_config["volumes"]:
-        return []
-
-    default_config = render_config["volumes"]["default"]
-    if "uid" not in default_config or "gid" not in default_config or "mode" not in default_config:
-        return []
-
-    dirs_to_create = []
-    services = rendered_config.get("services", {})
-
-    for service_name, service_config in services.items():
-        volumes = service_config.get("volumes", [])
-        for volume in volumes:
-            if not isinstance(volume, str):
-                continue
-
-            # Parse the volume to extract host path
-            parts = volume.split(":")
-            if len(parts) < 2:
-                continue
-
-            host_path = parts[0]
-
-            # Check if this path matches the default pattern
-            # Pattern: /mnt/nvme/apps/<container>/<folder>
-            if host_path.startswith("/mnt/nvme/apps/"):
-                dirs_to_create.append({
-                    "path": host_path,
-                    "uid": default_config["uid"],
-                    "gid": default_config["gid"],
-                    "mode": str(default_config["mode"]),  # Convert to string for octal
-                })
-
-    return dirs_to_create
-
-
 def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
     """
     Ensure directories exist with correct permissions via TrueNAS API.
+    For files, only ownership is adjusted (not permissions).
     """
     for dir_info in dirs:
         path = dir_info["path"]
@@ -184,51 +144,89 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
         try:
             stat_result = client.call("filesystem.stat", path)
             exists = True
+            is_file = stat_result.get("type") == "FILE"
         except Exception:
             exists = False
+            is_file = False
 
         if not exists:
-            # Create directory - ensure parent exists first
-            console.print(f"[dim]Creating directory: {path}[/dim]")
-            try:
-                parent_path = str(Path(path).parent)
+            # Determine if this should be a file or directory based on the path
+            # If path has an extension (contains a dot after the last slash), treat as file
+            path_obj = Path(path)
+            looks_like_file = "." in path_obj.name
 
-                # Check if parent exists, create if needed
+            if looks_like_file:
+                console.print(f"[dim]Creating file parent directory: {path_obj.parent}[/dim]")
                 try:
-                    client.call("filesystem.stat", parent_path)
-                except Exception:
-                    # Parent doesn't exist, create it
-                    client.call("filesystem.mkdir", {"path": parent_path})
+                    parent_path = str(path_obj.parent)
 
-                # Now create the actual directory
-                client.call("filesystem.mkdir", {"path": path})
+                    # Ensure parent directory exists
+                    try:
+                        client.call("filesystem.stat", parent_path)
+                    except Exception:
+                        # Parent doesn't exist, create it
+                        client.call("filesystem.mkdir", {"path": parent_path})
+                        # Set ownership on parent
+                        client.call("filesystem.chown", {
+                            "path": parent_path,
+                            "uid": uid,
+                            "gid": gid,
+                            "options": {"recursive": False}
+                        })
+                        # Set permissions on parent
+                        client.call("filesystem.setperm", {
+                            "path": parent_path,
+                            "mode": mode,
+                            "options": {"recursive": False, "traverse": False}
+                        })
 
-                # Set ownership
-                client.call("filesystem.chown", {
-                    "path": path,
-                    "uid": uid,
-                    "gid": gid,
-                    "options": {"recursive": False}
-                })
+                    console.print(f"[yellow]Note:[/yellow] File {path} doesn't exist - will be created by container")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to create parent for {path}: {e}")
+                    raise
+            else:
+                # Create directory
+                console.print(f"[dim]Creating directory: {path}[/dim]")
+                try:
+                    parent_path = str(path_obj.parent)
 
-                # Set permissions
-                client.call("filesystem.setperm", {
-                    "path": path,
-                    "mode": mode,
-                    "options": {"recursive": False, "traverse": False}
-                })
-                console.print(f"[green]✓[/green] Created {path} (uid={uid}, gid={gid}, mode={mode})")
-            except Exception as e:
-                console.print(f"[red]✗[/red] Failed to create {path}: {e}")
-                raise
+                    # Check if parent exists, create if needed
+                    try:
+                        client.call("filesystem.stat", parent_path)
+                    except Exception:
+                        # Parent doesn't exist, create it
+                        client.call("filesystem.mkdir", {"path": parent_path})
+
+                    # Now create the actual directory
+                    client.call("filesystem.mkdir", {"path": path})
+
+                    # Set ownership
+                    client.call("filesystem.chown", {
+                        "path": path,
+                        "uid": uid,
+                        "gid": gid,
+                        "options": {"recursive": False}
+                    })
+
+                    # Set permissions
+                    client.call("filesystem.setperm", {
+                        "path": path,
+                        "mode": mode,
+                        "options": {"recursive": False, "traverse": False}
+                    })
+                    console.print(f"[green]✓[/green] Created {path} (uid={uid}, gid={gid}, mode={mode})")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to create {path}: {e}")
+                    raise
         else:
-            # Check and fix permissions if needed
+            # Path exists - check and fix permissions/ownership if needed
             current_uid = stat_result.get("uid")
             current_gid = stat_result.get("gid")
             current_mode = oct(stat_result.get("mode", 0))[-3:]  # Get last 3 digits
 
             needs_chown = current_uid != uid or current_gid != gid
-            needs_chmod = current_mode != mode
+            # Only fix permissions on directories, not files
+            needs_chmod = not is_file and current_mode != mode
 
             if needs_chown or needs_chmod:
                 changes = []
@@ -237,7 +235,8 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                 if needs_chmod:
                     changes.append(f"mode {current_mode} → {mode}")
 
-                console.print(f"[yellow]⚠[/yellow] Fixing {path}: {', '.join(changes)}")
+                item_type = "file" if is_file else "directory"
+                console.print(f"[yellow]⚠[/yellow] Fixing {item_type} {path}: {', '.join(changes)}")
 
                 try:
                     if needs_chown:
@@ -258,55 +257,67 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                     console.print(f"[red]✗[/red] Failed to fix {path}: {e}")
                     raise
             else:
-                console.print(f"[green]✓[/green] {path}")
+                item_type = "file" if is_file else "directory"
+                console.print(f"[green]✓[/green] {path} ({item_type})")
 
 
-def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, Any]) -> str:
+def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, Any]) -> tuple[str, bool]:
     """
     Parse volume placeholder syntax like:
     - @config -> uses default template with folder=config, mount=/config
     - @config:/path -> uses default template with custom mount path
-    - @config.foldername -> uses default template with custom folder name
-    - @config.foldername:/path -> custom folder and mount path
+    - @config:ro -> uses default template with read-only option
+    - @config:/path:ro -> custom mount path with read-only option
     - @docker -> uses specific docker mount if defined, otherwise uses default
     - @media -> uses specific media mount if defined, otherwise uses default
 
-    Returns the rendered volume string.
+    Returns a tuple of (rendered_volume_string, uses_default_template).
     """
     if not volume.startswith("@"):
-        return volume
+        return volume, False
 
-    # Split off any options like :ro at the end
+    # Split the volume string into parts
     parts = volume.split(":")
     placeholder = parts[0]
-    mount_opts = parts[2] if len(parts) > 2 else None
 
-    # Parse the placeholder @type.folder or @type
-    placeholder = placeholder[1:]  # Remove @
-    if "." in placeholder:
-        mount_type, folder = placeholder.split(".", 1)
-    else:
-        mount_type = placeholder
-        folder = None
+    # Parse the placeholder @type
+    mount_type = placeholder[1:]  # Remove @
+    folder = mount_type  # Folder name is the same as mount type
+
+    # Determine custom mount path and options
+    # Possible formats:
+    # - @type -> no custom mount, no options
+    # - @type:ro -> no custom mount, with options
+    # - @type:/custom/path -> custom mount, no options
+    # - @type:/custom/path:ro -> custom mount, with options
+    custom_mount_path = None
+    mount_opts = None
+
+    if len(parts) > 1:
+        # Check if parts[1] is a mount option (like 'ro', 'rw') or a path
+        if parts[1] in ['ro', 'rw', 'z', 'Z', 'shared', 'slave', 'private', 'rshared', 'rslave', 'rprivate']:
+            # parts[1] is an option, not a path
+            mount_opts = parts[1]
+        else:
+            # parts[1] is a custom mount path
+            custom_mount_path = parts[1]
+            # Check for options in parts[2]
+            if len(parts) > 2:
+                mount_opts = parts[2]
 
     # Get mount configuration
     if "volumes" not in config:
         raise ValueError("No 'volumes' section found in config")
 
     # Check if specific mount type exists, otherwise use default
+    uses_default = False
     if mount_type in config["volumes"]:
         mount_config = config["volumes"][mount_type]
     elif "default" in config["volumes"]:
         mount_config = config["volumes"]["default"]
+        uses_default = True
     else:
         raise ValueError(f"Mount type '{mount_type}' not found and no 'default' template in config")
-
-    # Determine folder name
-    if folder is None:
-        # Default to mount type name
-        # e.g., @data -> folder="data", @data:/custom/path -> folder="data"
-        # To use a different folder name, use: @data.customfolder:/path
-        folder = mount_type
 
     # Render host path using Jinja2
     # Support both 'host' and 'host_path' keys for backwards compatibility
@@ -318,8 +329,8 @@ def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, A
     host_path = host_path_template.render(container=service_name, folder=folder, app=config.get("app"))
 
     # Determine mount path
-    if len(parts) > 1:
-        mount_path = parts[1]
+    if custom_mount_path:
+        mount_path = custom_mount_path
     else:
         # Support both 'mount' and 'mount_path' keys for backwards compatibility
         mount_path = mount_config.get("mount") or mount_config.get("mount_path")
@@ -335,7 +346,7 @@ def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, A
     if mount_opts:
         result += f":{mount_opts}"
 
-    return result
+    return result, uses_default
 
 
 def parse_label_template_call(label: str) -> tuple[str | None, list[str], dict[str, str]]:
@@ -935,10 +946,15 @@ def replace_secrets(yaml_content: str, secrets_path: Path, redacted: bool = Fals
     return result
 
 
-def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: str = None) -> dict[str, Any]:
-    """Render the docker-compose template with boilerplate."""
+def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: str = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """
+    Render the docker-compose template with boilerplate.
+
+    Returns a tuple of (rendered_config, default_volume_dirs).
+    default_volume_dirs is a list of dicts with path, uid, gid, mode for directories to create.
+    """
     if "services" not in template:
-        return template
+        return template, []
 
     # Add app name to config for use in templates
     if app_name:
@@ -948,6 +964,13 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
     # Get common container configuration
     common_container = config.get("common", {}).get("container", {})
 
+    # Get default volume config for directory creation
+    default_volume_config = config.get("volumes", {}).get("default", {})
+    has_default_config = all(k in default_volume_config for k in ["uid", "gid", "mode"])
+
+    # Track directories to create
+    dirs_to_create = []
+
     for service_name, service_config in template["services"].items():
         # Process volumes first
         if "volumes" in service_config:
@@ -956,9 +979,19 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
                 # Only process string volumes (short syntax)
                 # Dict volumes (long syntax) are passed through as-is
                 if isinstance(volume, str):
-                    processed_volumes.append(
-                        parse_volume_placeholder(volume, service_name, config)
-                    )
+                    rendered_volume, uses_default = parse_volume_placeholder(volume, service_name, config)
+                    processed_volumes.append(rendered_volume)
+
+                    # If this volume uses the default template, track it for directory creation
+                    if uses_default and has_default_config:
+                        # Extract host path from rendered volume
+                        host_path = rendered_volume.split(":")[0]
+                        dirs_to_create.append({
+                            "path": host_path,
+                            "uid": default_volume_config["uid"],
+                            "gid": default_volume_config["gid"],
+                            "mode": str(default_volume_config["mode"]),
+                        })
                 else:
                     processed_volumes.append(volume)
             service_config["volumes"] = processed_volumes
@@ -1022,7 +1055,7 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
     if common_compose:
         template = deep_merge(template, common_compose)
 
-    return template
+    return template, dirs_to_create
 
 
 def preprocess_yaml(content: str) -> str:
@@ -1260,7 +1293,7 @@ def _update_single_app(
             template = yaml.safe_load(preprocessed)
 
         render_config = load_config(config)
-        rendered = render_compose(template, render_config, app_name)
+        rendered, dirs_to_ensure = render_compose(template, render_config, app_name)
 
         # Save rendered file to apps/.state/rendered/<app_name>.yml
         rendered_dir = apps_dir / ".state" / "rendered"
@@ -1329,8 +1362,7 @@ def _update_single_app(
             apps = client.call("app.query", [["name", "=", app_name]])
             app_exists = len(apps) > 0
 
-            # Extract and ensure directories exist with correct permissions
-            dirs_to_ensure = extract_default_volume_dirs(rendered, render_config)
+            # Ensure directories exist with correct permissions (collected during rendering)
             if dirs_to_ensure:
                 ensure_directories(client, dirs_to_ensure)
 
@@ -1508,8 +1540,8 @@ def _render_single_file(
         preprocessed = preprocess_yaml(content)
         template = yaml.safe_load(preprocessed)
 
-    # Render template
-    rendered = render_compose(template, render_config, app_name)
+    # Render template (ignore dirs_to_ensure for standalone render command)
+    rendered, _ = render_compose(template, render_config, app_name)
 
     # Convert to YAML string
     rendered_yaml = yaml.dump(
