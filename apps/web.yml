@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: homepage
 services:
   # Modern reverse proxy and load balancer
   # https://doc.traefik.io/traefik/

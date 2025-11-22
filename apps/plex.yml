@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: plex
 services:
   # Media streaming and organization platform
   # https://support.plex.tv/

@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: backrest
 services:
   backrest:
     image: garethgeorge/backrest:latest

@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: https://dalboplex.ch/images/owlmend-dark.svg
 services:
   # Owlmend application
   # https://github.com/heapoutofspace/owlmend
@@ -22,7 +23,14 @@ services:
       - homepage:
           group: Apps
           description: Medical study tool
+          icon: /images/owlmend-light.svg
           weight: 10
+      - homepage:
+          group: Services
+          icon: /images/owlmend-light.svg
+          description: Medical study tool
+          instance: public
+          weight: 30
 
   # MongoDB database
   # https://hub.docker.com/_/mongo
@@ -60,5 +68,7 @@ services:
           port: 8081
       - homepage:
           group: Apps
+          name: MongoDB
           description: MongoDB admin UI
+          icon: mongodb
           weight: 11

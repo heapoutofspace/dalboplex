@@ -946,15 +946,19 @@ def replace_secrets(yaml_content: str, secrets_path: Path, redacted: bool = Fals
     return result
 
 
-def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: str = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: str = None) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
     """
     Render the docker-compose template with boilerplate.
 
-    Returns a tuple of (rendered_config, default_volume_dirs).
+    Returns a tuple of (rendered_config, default_volume_dirs, icon_url).
     default_volume_dirs is a list of dicts with path, uid, gid, mode for directories to create.
+    icon_url is the custom icon URL if specified via x-icon field.
     """
+    # Extract icon URL if present (top-level field, not part of services)
+    icon_url = template.pop("x-icon", None)
+
     if "services" not in template:
-        return template, []
+        return template, [], icon_url
 
     # Add app name to config for use in templates
     if app_name:
@@ -1055,7 +1059,7 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
     if common_compose:
         template = deep_merge(template, common_compose)
 
-    return template, dirs_to_create
+    return template, dirs_to_create, icon_url
 
 
 def preprocess_yaml(content: str) -> str:
@@ -1138,6 +1142,96 @@ def get_truenas_client() -> Client:
     client = Client(uri=host)
     client.call("auth.login_with_api_key", api_key)
     return client
+
+
+def expand_icon_url(icon: str) -> str:
+    """
+    Expand an icon reference to a full URL.
+
+    If the icon is already a full URL (starts with http:// or https://),
+    return it as-is. Otherwise, treat it as an app name and expand to
+    the Homarr dashboard icons CDN URL.
+
+    Args:
+        icon: Icon reference (URL or app name)
+
+    Returns:
+        Full icon URL
+    """
+    if icon.startswith('http://') or icon.startswith('https://'):
+        return icon
+
+    # Expand app name to Homarr dashboard icons CDN URL
+    return f"https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/{icon}.png"
+
+
+def update_app_icon(client: Client, app_name: str, icon: str) -> tuple[bool, bool]:
+    """
+    Update the app icon in the metadata.yaml file if needed.
+
+    TrueNAS SCALE doesn't support setting icons via API for custom apps,
+    so we edit the metadata.yaml file directly.
+
+    Args:
+        client: TrueNAS API client
+        app_name: Name of the app
+        icon: Icon reference (URL or app name)
+
+    Returns:
+        Tuple of (success, was_updated) - was_updated is False if icon was already correct
+    """
+    try:
+        import yaml
+
+        # Expand icon to full URL if needed
+        icon_url = expand_icon_url(icon)
+
+        metadata_path = f"/mnt/.ix-apps/app_configs/{app_name}/metadata.yaml"
+
+        # Download the current metadata file
+        result = client.call("core.download", "filesystem.get", [metadata_path], f"{app_name}_metadata.yaml")
+
+        if isinstance(result, (list, tuple)) and len(result) >= 2:
+            download_url = result[1]
+
+            # Fetch the content
+            import urllib.request
+            config = load_truenas_config()
+            host = config["host"]
+            full_url = f"{host}{download_url}"
+
+            with urllib.request.urlopen(full_url, timeout=10) as response:
+                content = response.read().decode('utf-8')
+                metadata = yaml.safe_load(content)
+
+                # Check if icon is already correct
+                current_icon = metadata.get('metadata', {}).get('icon')
+                if current_icon == icon_url:
+                    return True, False  # Success, but no update needed
+
+                # Update the icon field
+                if 'metadata' not in metadata:
+                    metadata['metadata'] = {}
+                metadata['metadata']['icon'] = icon_url
+
+                # Write back to TrueNAS using filesystem.file_receive
+                updated_yaml = yaml.dump(metadata, default_flow_style=False, sort_keys=False)
+
+                # Use filesystem.file_receive to write the file
+                # This expects base64-encoded content
+                import base64
+                encoded_content = base64.b64encode(updated_yaml.encode('utf-8')).decode('ascii')
+
+                client.call("filesystem.file_receive", metadata_path, encoded_content, {
+                    "mode": 0o644
+                })
+
+                return True, True  # Success and updated
+
+        return False, False
+    except Exception as e:
+        # Icon update is non-critical, fail silently
+        return False, False
 
 
 def get_app_lifecycle_logs(client: Client, app_name: str, lines: int = 50, start_time: float = None) -> str:
@@ -1434,7 +1528,7 @@ def _update_single_app(
             template = yaml.safe_load(preprocessed)
 
         render_config = load_config(config)
-        rendered, dirs_to_ensure = render_compose(template, render_config, app_name)
+        rendered, dirs_to_ensure, icon_url = render_compose(template, render_config, app_name)
 
         # Save rendered file to apps/.state/rendered/<app_name>.yml
         rendered_dir = apps_dir / ".state" / "rendered"
@@ -1517,12 +1611,14 @@ def _update_single_app(
                 import time
                 start_time = time.time()
                 try:
+                    # Create app with minimal compose file first (needed for metadata.yaml to exist)
+                    minimal_compose = "version: '3.7'\nservices:\n  placeholder:\n    image: hello-world\n"
                     create_data = {
                         "custom_app": True,
                         "app_name": app_name,
                         "version": "1.0.0",
                         "train": "stable",
-                        "custom_compose_config_string": rendered_yaml,
+                        "custom_compose_config_string": minimal_compose,
                     }
                     job_id = client.call("app.create", create_data)
                     console.print(f"[green]✓[/green] Submitted creation of '{app_name}'")
@@ -1568,6 +1664,46 @@ def _update_single_app(
                                 console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
                             return False
 
+                    # Placeholder created successfully, now update icon if specified
+                    if icon_url:
+                        success, was_updated = update_app_icon(client, app_name, icon_url)
+                        if success and was_updated:
+                            console.print(f"[dim]✓ Updated app icon[/dim]")
+
+                    # Now update with the real compose file
+                    console.print(f"[dim]Updating with final configuration...[/dim]")
+                    update_data = {
+                        "custom_compose_config_string": rendered_yaml,
+                    }
+                    update_job_id = client.call("app.update", app_name, update_data)
+
+                    # Save the rendered file with secrets to installed directory
+                    with open(installed_file, "w") as f:
+                        f.write(rendered_yaml)
+
+                    # Wait for update job to complete
+                    poll_start = time.time()
+                    while time.time() - poll_start < max_wait:
+                        update_jobs = client.call("core.get_jobs", [["id", "=", update_job_id]])
+                        if update_jobs:
+                            update_job = update_jobs[0]
+                            update_state = update_job.get("state")
+                            if update_state in ["SUCCESS", "FAILED", "ABORTED"]:
+                                break
+                        time.sleep(2)
+
+                    # Check final update job state
+                    if update_jobs:
+                        update_job = update_jobs[0]
+                        update_state = update_job.get("state")
+                        if update_state != "SUCCESS":
+                            error = update_job.get("error") or update_job.get("exception") or f"Job ended in state: {update_state}"
+                            console.print(f"[red]✗[/red] Update job failed: {error}")
+                            logs = get_app_lifecycle_logs(client, app_name, lines=30, start_time=start_time)
+                            if logs:
+                                console.print(f"\n[yellow]Recent logs:[/yellow]\n{logs}")
+                            return False
+
                     # Success - update hash
                     if app_name not in state:
                         state[app_name] = {}
@@ -1575,7 +1711,6 @@ def _update_single_app(
                     save_state(state_path, state)
 
                     console.print(f"[green]✓[/green] '{app_name}' created successfully")
-                    console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
 
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to create app: {e}")
@@ -1592,6 +1727,12 @@ def _update_single_app(
                     # Record whether app was running before
                     app_before = apps[0]
                     was_running = app_before.get("state") == "RUNNING"
+
+                    # Update icon BEFORE updating the app (so it takes effect immediately)
+                    if icon_url:
+                        success, was_updated = update_app_icon(client, app_name, icon_url)
+                        if success and was_updated:
+                            console.print(f"[dim]✓ Updated app icon[/dim]")
 
                     # Update the app
                     update_data = {
@@ -1683,7 +1824,6 @@ def _update_single_app(
                     save_state(state_path, state)
 
                     console.print(f"[green]✓[/green] '{app_name}' updated successfully")
-                    console.print(f"[dim]Saved installed config to {installed_file}[/dim]")
 
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to update app: {e}")
@@ -1829,7 +1969,7 @@ def _render_single_file(
         template = yaml.safe_load(preprocessed)
 
     # Render template (ignore dirs_to_ensure for standalone render command)
-    rendered, _ = render_compose(template, render_config, app_name)
+    rendered, _, _ = render_compose(template, render_config, app_name)
 
     # Convert to YAML string
     rendered_yaml = yaml.dump(

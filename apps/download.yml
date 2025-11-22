@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: qbittorrent
 services:
   # Feature-rich BitTorrent client
   # https://github.com/qbittorrent/qBittorrent/wiki

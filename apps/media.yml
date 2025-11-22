@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: radarr
 services:
   # Movie collection manager
   # https://wiki.servarr.com/radarr

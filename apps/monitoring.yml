@@ -1,4 +1,5 @@
 version: '3.7'
+x-icon: grafana
 services:
   # Metrics collection and time-series database
   # https://prometheus.io/
