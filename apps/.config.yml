@@ -126,14 +126,15 @@ labels:
   homepage:
     args:
       - group
-      - description
     defaults:
       weight: 5
       instance: private
     template: |
       - homepage.instance.{{ instance }}.group={{ group }}
       - homepage.instance.{{ instance }}.name={{ name or container|replace('-', ' ')|title }}
+      {% if description %}
       - homepage.instance.{{ instance }}.description={{ description }}
+      {% endif %}
       - homepage.instance.{{ instance }}.weight={{ weight }}
       - homepage.instance.{{ instance }}.icon={{ icon or container }}
       - homepage.instance.{{ instance }}.href=

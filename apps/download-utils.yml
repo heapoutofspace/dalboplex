@@ -1,0 +1,108 @@
+version: '3.7'
+x-icon: https://raw.githubusercontent.com/StuffAnThings/qbit_manage/refs/heads/master/icons/qbm_logo.png
+services:
+  # Torrent management and automation tool
+  # https://github.com/StuffAnThings/qbit_manage
+  qbit_manage:
+    image: ghcr.io/stuffanthings/qbit_manage:develop
+    volumes:
+      - @config
+      - @media
+      - /mnt/nvme/apps/qbittorrent/config:/qbittorrent:ro
+    environment:
+      # Web API Configuration
+      - QBT_WEB_SERVER=true
+      - QBT_PORT=80
+
+      # Scheduler Configuration
+      - QBT_RUN=false
+      - QBT_CONFIG_DIR=/config
+
+      # Logging Configuration
+      - QBT_LOG_LEVEL=INFO
+      - QBT_LOGFILE=qbit_manage.log
+      - QBT_LOG_SIZE=10
+      - QBT_LOG_COUNT=5
+      - QBT_DIVIDER==
+      - QBT_WIDTH=100
+    x-features:
+      - domain: qbit-manage
+      - homepage:
+          group: Download
+          description: Advanced torrent management
+          name: qBit Manage
+          weight: 20
+          icon: https://raw.githubusercontent.com/StuffAnThings/qbit_manage/refs/heads/master/icons/qbm_logo.png
+      - disable-watchtower:
+
+  # Failed and stalled download handling
+  # https://github.com/ManiMatter/decluttarr
+  decluttarr:
+    image: ghcr.io/heapoutofspace/decluttarr:instance-job-config
+    volumes:
+      - @config:/app/config
+      - @logs:/app/logs
+      - @media
+
+  # Automatic archive extraction
+  # https://github.com/Unpackerr/unpackerr
+  unpackerr:
+    image: golift/unpackerr:latest
+    user: 1000:1000
+    environment:
+      - UN_LOG_FILE=/log/unpackerr.log
+      - UN_SONARR_0_URL=http://sonarr:8989
+      - UN_SONARR_0_API_KEY=$SONARR_API_KEY
+      - UN_SONARR_0_PATHS_0=/media/downloads
+      - UN_RADARR_0_URL=http://radarr:7878
+      - UN_RADARR_0_API_KEY=$RADARR_API_KEY
+      - UN_RADARR_0_PATHS_0=/media/downloads
+      - UN_WEBSERVER_METRICS=true
+    volumes:
+      - @log
+      - @media
+    x-features:
+      - homepage:
+          group: Download
+          description: Archive extraction
+          href: https://docker.dalboplex.ch/show?name=unpackerr
+          weight: 50
+          icon: https://unpackerr.zip/img/icon.png
+      - metrics:
+          port: 5656
+
+  # Cross-seeding automation for torrent trackers
+  # https://www.cross-seed.org/
+  cross-seed:
+    image: ghcr.io/cross-seed/cross-seed:6
+    user: 1000:1000
+    volumes:
+      - @config
+      - @media
+    command: daemon
+
+  # Automatic torrent downloader
+  # https://autobrr.com/
+  autobrr:
+    image: ghcr.io/autobrr/autobrr:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: autobrr
+          port: 7474
+      - homepage:
+          group: Download
+          description: Torrent announcement handling
+          weight: 60
+      - widget:
+          key: $AUTOBRR_API_KEY
+
+  # qBittorrent reannounce and category management
+  # https://github.com/buroa/qbrr
+  qbrr:
+    image: ghcr.io/buroa/qbrr:latest
+    user: 1000:1000
+    environment:
+      - QBITTORRENT_HOST=http://qbittorrent

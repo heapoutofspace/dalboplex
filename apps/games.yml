@@ -1,0 +1,50 @@
+version: '3.7'
+x-icon: steam
+services:
+  # Minecraft Java server
+  # Uses generic Java container to run custom start.sh script
+  minecraft:
+    image: eclipse-temurin:21-jre
+    user: 1000:1000
+    working_dir: /app
+    command: /app/start.sh
+    volumes:
+      - /mnt/nvme/games/minecraft:/app
+    ports:
+      - "25565:25565"
+    environment:
+      - JAVA_OPTS=-Xmx16G -Xms4G
+    x-features:
+      - homepage:
+          group: Games
+          weight: 10
+          href: https://docker.dalboplex.ch/show?name=minecraft
+      - uptime:
+          monitor: docker
+
+  # Satisfactory dedicated server
+  # https://github.com/wolveix/satisfactory-server
+  satisfactory:
+    image: wolveix/satisfactory-server:latest
+    volumes:
+      - /mnt/nvme/games/satisfactory:/config
+    ports:
+      - "7777:7777"
+      - "7777:7777/udp"
+      - "8888:8888"
+    environment:
+      - MAXPLAYERS=8
+      - STEAMBETA=false
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 4G
+    x-features:
+      - homepage:
+          group: Games
+          weight: 20
+          href: https://docker.dalboplex.ch/show?name=satisfactory
+      - uptime:
+          monitor: docker

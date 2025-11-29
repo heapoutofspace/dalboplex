@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-39+-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-44-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -115,10 +115,9 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
 | [![Plex](https://img.shields.io/badge/Plex-EBAF00?logo=plex&logoColor=white)](https://www.plex.tv/) | [plex.dalboplex.ch](https://plex.dalboplex.ch) | Media server |
+| [![Tautulli](https://img.shields.io/badge/Tautulli-CC7B19?logo=tautulli&logoColor=white)](https://tautulli.com/) | [stats.dalboplex.ch](https://stats.dalboplex.ch) | Plex statistics |
 | [![Radarr](https://img.shields.io/badge/Radarr-FFC230?logo=radarr&logoColor=white)](https://radarr.video/) | [movies.dalboplex.ch](https://movies.dalboplex.ch) | Movie manager |
 | [![Sonarr](https://img.shields.io/badge/Sonarr-4051B5?logo=sonarr&logoColor=white)](https://sonarr.tv/) | [tv.dalboplex.ch](https://tv.dalboplex.ch) | TV show manager |
-| [![Overseerr](https://img.shields.io/badge/Overseerr-6366F1?logo=overseerr&logoColor=white)](https://overseerr.dev/) | [request.dalboplex.ch](https://request.dalboplex.ch) | Request portal |
-| [![Tautulli](https://img.shields.io/badge/Tautulli-CC7B19?logo=tautulli&logoColor=white)](https://tautulli.com/) | [stats.dalboplex.ch](https://stats.dalboplex.ch) | Plex statistics |
 
 ### Media Management (Secondary)
 
@@ -126,25 +125,35 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 
 | Application | Subdomain | Purpose |
 |-------------|-----------|---------|
-| [![Kometa](https://img.shields.io/badge/Kometa-00A4DC?logoColor=white)](https://kometa.wiki/) | - | Metadata manager |
+| [![Overseerr](https://img.shields.io/badge/Overseerr-6366F1?logo=overseerr&logoColor=white)](https://overseerr.dev/) | [requests.dalboplex.ch](https://requests.dalboplex.ch) | Media request portal |
 | [![Bazarr](https://img.shields.io/badge/Bazarr-463BAC?logo=bazarr&logoColor=white)](https://www.bazarr.media/) | [subtitles.dalboplex.ch](https://subtitles.dalboplex.ch) | Subtitle manager |
-| [![Prowlarr](https://img.shields.io/badge/Prowlarr-FF6C2C?logo=prowlarr&logoColor=white)](https://prowlarr.com/) | [indexer.dalboplex.ch](https://indexer.dalboplex.ch) | Indexer manager |
+| [![Prowlarr](https://img.shields.io/badge/Prowlarr-FF6C2C?logo=prowlarr&logoColor=white)](https://prowlarr.com/) | [indexers.dalboplex.ch](https://indexers.dalboplex.ch) | Indexer manager |
+| [![Kometa](https://img.shields.io/badge/Kometa-00A4DC?logoColor=white)](https://kometa.wiki/) | - | Metadata manager |
 | [![Recyclarr](https://img.shields.io/badge/Recyclarr-4051B5?logoColor=white)](https://recyclarr.dev/) | - | Quality profiles |
 | [![Collexions](https://img.shields.io/badge/Collexions-5865F2?logoColor=white)](https://github.com/Woahai321/list-sync) | [collexions.dalboplex.ch](https://collexions.dalboplex.ch) | Collection manager |
+| [![Plex Auto Languages](https://img.shields.io/badge/Plex_Auto_Languages-EBAF00?logoColor=white)](https://github.com/RemiRigal/Plex-Auto-Languages) | - | Language track automation |
 
-### Download Management
+### Download Clients
 
 **Compose file**: [download.yml](apps/download.yml)
 
-| Application | Subdomain | Purpose                 |
-|-------------|-----------|-------------------------|
-| [![qBittorrent](https://img.shields.io/badge/qBittorrent-2E72D2?logo=qbittorrent&logoColor=white)](https://www.qbittorrent.org/) | [download.dalboplex.ch](https://download.dalboplex.ch) | BitTorrent client       |
-| [![SABnzbd](https://img.shields.io/badge/SABnzbd-FFC230?logoColor=white)](https://sabnzbd.org/) | [sabnzbd.dalboplex.ch](https://sabnzbd.dalboplex.ch) | Usenet client           |
-| [![qBit Manage](https://img.shields.io/badge/qBit_Manage-2E72D2?logoColor=white)](https://github.com/StuffAnThings/qbit_manage) | [qbit-manage.dalboplex.ch](https://qbit-manage.dalboplex.ch) | Torrent automation      |
-| [![decluttarr](https://img.shields.io/badge/decluttarr-10B981?logoColor=white)](https://github.com/ManiMatter/decluttarr) | - | Download error handling |
-| [![Autobrr](https://img.shields.io/badge/Autobrr-3B82F6?logoColor=white)](https://autobrr.com/) | [autobrr.dalboplex.ch](https://autobrr.dalboplex.ch) | Torrent automation      |
-| [![Cross-seed](https://img.shields.io/badge/Cross--seed-10B981?logoColor=white)](https://github.com/cross-seed/cross-seed) | - | Cross-seeding           |
-| [![Unpackerr](https://img.shields.io/badge/Unpackerr-F59E0B?logoColor=white)](https://github.com/Unpackerr/unpackerr) | - | Archive extraction      |
+| Application | Subdomain | Purpose |
+|-------------|-----------|---------|
+| [![qBittorrent](https://img.shields.io/badge/qBittorrent-2E72D2?logo=qbittorrent&logoColor=white)](https://www.qbittorrent.org/) | [torrents.dalboplex.ch](https://torrents.dalboplex.ch) | BitTorrent client |
+| [![SABnzbd](https://img.shields.io/badge/SABnzbd-FFC230?logoColor=white)](https://sabnzbd.org/) | [usenet.dalboplex.ch](https://usenet.dalboplex.ch) | Usenet client |
+
+### Download Automation
+
+**Compose file**: [download-utils.yml](apps/download-utils.yml)
+
+| Application | Subdomain | Purpose |
+|-------------|-----------|---------|
+| [![qBit Manage](https://img.shields.io/badge/qBit_Manage-2E72D2?logoColor=white)](https://github.com/StuffAnThings/qbit_manage) | [qbit-manage.dalboplex.ch](https://qbit-manage.dalboplex.ch) | Torrent management |
+| [![Unpackerr](https://img.shields.io/badge/Unpackerr-F59E0B?logoColor=white)](https://github.com/Unpackerr/unpackerr) | - | Archive extraction |
+| [![Autobrr](https://img.shields.io/badge/Autobrr-3B82F6?logoColor=white)](https://autobrr.com/) | [autobrr.dalboplex.ch](https://autobrr.dalboplex.ch) | Torrent announcements |
+| [![decluttarr](https://img.shields.io/badge/decluttarr-10B981?logoColor=white)](https://github.com/ManiMatter/decluttarr) | - | Failed download cleanup |
+| [![Cross-seed](https://img.shields.io/badge/Cross--seed-10B981?logoColor=white)](https://github.com/cross-seed/cross-seed) | - | Cross-seeding |
+| [![qbrr](https://img.shields.io/badge/qbrr-2E72D2?logoColor=white)](https://github.com/buroa/qbrr) | - | Reannounce & categories |
 
 ### Web Infrastructure
 
@@ -171,6 +180,15 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/) | - | Database |
 | [![Mongo Express](https://img.shields.io/badge/Mongo_Express-13AA52?logoColor=white)](https://github.com/mongo-express/mongo-express) | [mongo.dalboplex.ch](https://mongo.dalboplex.ch) | MongoDB admin UI |
 
+### Game Servers
+
+**Compose file**: [games.yml](apps/games.yml)
+
+| Application | Ports | Purpose |
+|-------------|-------|---------|
+| [![Minecraft](https://img.shields.io/badge/Minecraft-62B47A?logo=minecraft&logoColor=white)](https://www.minecraft.net/) | 25565 | Minecraft Java server |
+| [![Satisfactory](https://img.shields.io/badge/Satisfactory-FF6B00?logoColor=white)](https://github.com/wolveix/satisfactory-server) | 7777 | Satisfactory dedicated server |
+
 ### Monitoring & Metrics
 
 **Compose file**: [monitoring.yml](apps/monitoring.yml)
@@ -185,7 +203,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
 | [![Beszel](https://img.shields.io/badge/Beszel-10B981?logoColor=white)](https://beszel.dev/) | [beszel.dalboplex.ch](https://beszel.dalboplex.ch) | Container monitoring |
 
-**Total Services**: 39+ containers across 7 compose files
+**Total Services**: 44 containers across 10 compose files
 
 ## Network & Security
 

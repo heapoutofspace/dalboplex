@@ -4,12 +4,13 @@ services:
   # Web-based file manager (Quantum fork)
   # https://github.com/gtsteffaniak/filebrowser
   filebrowser:
-    image: gtstef/filebrowser:beta
+    image: gtstef/filebrowser:latest
     user: 1000:1000
     environment:
       - FILEBROWSER_CONFIG=data/config.yaml
     volumes:
       - /mnt/nvme/apps:/mnt/apps
+      - /mnt/nvme/games:/mnt/games
       - /mnt/hdd/media:/mnt/media
       - /mnt/scratch/downloads:/mnt/downloads
       - @data:/home/filebrowser/data
