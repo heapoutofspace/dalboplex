@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-44-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-45-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -132,6 +132,8 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Recyclarr](https://img.shields.io/badge/Recyclarr-4051B5?logoColor=white)](https://recyclarr.dev/) | - | Quality profiles |
 | [![Collexions](https://img.shields.io/badge/Collexions-5865F2?logoColor=white)](https://github.com/Woahai321/list-sync) | [collexions.dalboplex.ch](https://collexions.dalboplex.ch) | Collection manager |
 | [![Plex Auto Languages](https://img.shields.io/badge/Plex_Auto_Languages-EBAF00?logoColor=white)](https://github.com/RemiRigal/Plex-Auto-Languages) | - | Language track automation |
+| [![Huntarr](https://img.shields.io/badge/Huntarr-FFC230?logoColor=white)](https://plexguide.github.io/Huntarr.io/) | [huntarr.dalboplex.ch](https://huntarr.dalboplex.ch) | Missing content hunter |
+| [![Cleanuparr](https://img.shields.io/badge/Cleanuparr-10B981?logoColor=white)](https://github.com/Cleanuparr/Cleanuparr) | [cleanuparr.dalboplex.ch](https://cleanuparr.dalboplex.ch) | Download cleanup |
 
 ### Download Clients
 
@@ -151,7 +153,6 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![qBit Manage](https://img.shields.io/badge/qBit_Manage-2E72D2?logoColor=white)](https://github.com/StuffAnThings/qbit_manage) | [qbit-manage.dalboplex.ch](https://qbit-manage.dalboplex.ch) | Torrent management |
 | [![Unpackerr](https://img.shields.io/badge/Unpackerr-F59E0B?logoColor=white)](https://github.com/Unpackerr/unpackerr) | - | Archive extraction |
 | [![Autobrr](https://img.shields.io/badge/Autobrr-3B82F6?logoColor=white)](https://autobrr.com/) | [autobrr.dalboplex.ch](https://autobrr.dalboplex.ch) | Torrent announcements |
-| [![decluttarr](https://img.shields.io/badge/decluttarr-10B981?logoColor=white)](https://github.com/ManiMatter/decluttarr) | - | Failed download cleanup |
 | [![Cross-seed](https://img.shields.io/badge/Cross--seed-10B981?logoColor=white)](https://github.com/cross-seed/cross-seed) | - | Cross-seeding |
 | [![qbrr](https://img.shields.io/badge/qbrr-2E72D2?logoColor=white)](https://github.com/buroa/qbrr) | - | Reannounce & categories |
 
@@ -203,7 +204,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
 | [![Beszel](https://img.shields.io/badge/Beszel-10B981?logoColor=white)](https://beszel.dev/) | [beszel.dalboplex.ch](https://beszel.dalboplex.ch) | Container monitoring |
 
-**Total Services**: 44 containers across 10 compose files
+**Total Services**: 45 containers across 10 compose files
 
 ## Network & Security
 

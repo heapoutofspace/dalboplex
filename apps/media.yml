@@ -78,9 +78,9 @@ services:
           subdomain: subtitles
           port: 6767
       - homepage:
-          group: MediaSecondary
+          group: MediaTertiary
           description: Subtitle management
-          weight: 20
+          weight: 10
       - widget:
           key: $BAZARR_API_KEY
 
@@ -154,3 +154,37 @@ services:
       - PLEX_TOKEN=$PLEX_API_KEY
     volumes:
       - @config
+
+  # Automated missing content hunter for Radarr and Sonarr
+  # https://github.com/plexguide/Huntarr.io
+  huntarr:
+    image: ghcr.io/plexguide/huntarr:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: huntarr
+          port: 9705
+      - homepage:
+          group: MediaTertiary
+          description: Missing content hunter
+          weight: 20
+
+  # Automated cleanup of blocked and stalled downloads
+  # https://github.com/Cleanuparr/Cleanuparr
+  cleanuparr:
+    image: ghcr.io/cleanuparr/cleanuparr:latest
+    environment:
+      - PORT=11011
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: cleanuparr
+          port: 11011
+      - homepage:
+          group: MediaTertiary
+          description: Download queue management
+          icon: https://cleanuparr.github.io/Cleanuparr/img/cleanuparr.svg
+          weight: 30

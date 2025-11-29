@@ -64,6 +64,6 @@ services:
           subdomain: stats
           port: 8181
       - homepage:
-          group: MediaPrimary
+          group: Monitoring
           description: Streaming statistics
-          weight: 15
+          weight: 25

@@ -35,15 +35,6 @@ services:
           icon: https://raw.githubusercontent.com/StuffAnThings/qbit_manage/refs/heads/master/icons/qbm_logo.png
       - disable-watchtower:
 
-  # Failed and stalled download handling
-  # https://github.com/ManiMatter/decluttarr
-  decluttarr:
-    image: ghcr.io/heapoutofspace/decluttarr:instance-job-config
-    volumes:
-      - @config:/app/config
-      - @logs:/app/logs
-      - @media
-
   # Automatic archive extraction
   # https://github.com/Unpackerr/unpackerr
   unpackerr:
