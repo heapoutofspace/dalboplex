@@ -1432,6 +1432,71 @@ def login(
 
 
 @app.command()
+def info(
+    raw: bool = typer.Option(False, "--raw", help="Output in machine-readable format (app:count)")
+):
+    """
+    Show information about compose files and container counts.
+
+    Displays a table of all app compose files and the number of containers in each.
+    Use --raw for machine-readable output.
+    """
+    apps_dir = Path("apps")
+
+    if not apps_dir.exists():
+        console.print("[red]Error: apps/ directory not found[/red]")
+        raise typer.Exit(1)
+
+    # Find all .yml files except config and secrets
+    compose_files = sorted(
+        [f for f in apps_dir.glob("*.yml")
+         if not f.name.startswith(".")]
+    )
+
+    if not compose_files:
+        console.print("[yellow]No compose files found in apps/[/yellow]")
+        raise typer.Exit(0)
+
+    # Count services in each file
+    app_counts = []
+    total_services = 0
+
+    for file_path in compose_files:
+        with open(file_path) as f:
+            content = f.read()
+            # Count lines that start with two spaces followed by a lowercase letter
+            # This matches service definitions in YAML
+            service_lines = [line for line in content.split('\n')
+                           if re.match(r'^  [a-z]', line)]
+            count = len(service_lines)
+            app_counts.append((file_path.stem, count))
+            total_services += count
+
+    if raw:
+        # Machine-readable output
+        for app_name, count in app_counts:
+            print(f"{app_name}:{count}")
+        print(f"total:{total_services}")
+        print(f"files:{len(app_counts)}")
+    else:
+        # Human-readable table
+        table = Table(title="Compose File Statistics")
+        table.add_column("App", style="cyan")
+        table.add_column("Containers", justify="right", style="magenta")
+
+        for app_name, count in app_counts:
+            table.add_row(app_name, str(count))
+
+        table.add_section()
+        table.add_row("[bold]Total[/bold]", f"[bold]{total_services}[/bold]")
+        table.add_row("[bold]Files[/bold]", f"[bold]{len(app_counts)}[/bold]")
+
+        console.print()
+        console.print(table)
+        console.print()
+
+
+@app.command()
 def status():
     """
     List all apps running on TrueNAS and their status.
