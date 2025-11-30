@@ -53,12 +53,6 @@ services:
       - @log
       - @media
     x-features:
-      - homepage:
-          group: Download
-          description: Archive extraction
-          href: https://docker.dalboplex.ch/show?name=unpackerr
-          weight: 50
-          icon: https://unpackerr.zip/img/icon.png
       - metrics:
           port: 5656
 

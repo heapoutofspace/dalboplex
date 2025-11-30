@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-45-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-43-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -30,7 +30,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 - **Automated Media Management**: Radarr, Sonarr, and supporting tools
 - **Secure Access**: OAuth2/OIDC authentication via Keycloak
 - **SSL/TLS**: Automated Let's Encrypt wildcard certificates
-- **Comprehensive Monitoring**: Prometheus, Scrutiny, Beszel
+- **Comprehensive Monitoring**: Prometheus, Scrutiny, Glances
 - **High Performance**: Tiered storage with NVMe scratch, SSD configs, HDD media
 - **Automated Updates**: Watchtower for container management
 
@@ -202,9 +202,8 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Glances](https://img.shields.io/badge/Glances-3B82F6?logoColor=white)](https://github.com/nicolargo/glances) | [glances.dalboplex.ch](https://glances.dalboplex.ch) | System monitoring |
 | [![Scrutiny](https://img.shields.io/badge/Scrutiny-FF6B6B?logoColor=white)](https://github.com/AnalogJ/scrutiny) | [disks.dalboplex.ch](https://disks.dalboplex.ch) | Disk health |
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
-| [![Beszel](https://img.shields.io/badge/Beszel-10B981?logoColor=white)](https://beszel.dev/) | [beszel.dalboplex.ch](https://beszel.dalboplex.ch) | Container monitoring |
 
-**Total Services**: 45 containers across 10 compose files
+**Total Services**: 43 containers across 10 compose files
 
 ## Network & Security
 
@@ -316,8 +315,6 @@ graph TB
 - **System Monitoring**: Glances provides real-time system metrics
 - **Disk Health**: Scrutiny monitors all storage devices (SMART)
 - **Internet Performance**: Speedtest every 2 hours
-- **Container Stats**: Beszel provides real-time monitoring
-- **GPU Metrics**: Intel Arc A380 monitoring via Beszel agent
 - **Log Aggregation**: Dozzle for centralized log viewing
 
 ### Backup & Redundancy
