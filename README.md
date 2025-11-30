@@ -3,7 +3,7 @@
 [![TrueNAS](https://img.shields.io/badge/TrueNAS-25.10.0-0095D5?logo=truenas&logoColor=white)](https://www.truenas.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Traefik](https://img.shields.io/badge/Traefik-v3.5-24A1C1?logo=traefikproxy&logoColor=white)](https://traefik.io/)
-[![Services](https://img.shields.io/badge/Services-43-success)](apps/)
+[![Services](https://img.shields.io/badge/Services-44-success)](apps/)
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 A comprehensive home media server and infrastructure setup running on TrueNAS, featuring automated media management, secure authentication, and enterprise-grade monitoring.
@@ -155,6 +155,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Autobrr](https://img.shields.io/badge/Autobrr-3B82F6?logoColor=white)](https://autobrr.com/) | [autobrr.dalboplex.ch](https://autobrr.dalboplex.ch) | Torrent announcements |
 | [![Cross-seed](https://img.shields.io/badge/Cross--seed-10B981?logoColor=white)](https://github.com/cross-seed/cross-seed) | - | Cross-seeding |
 | [![qbrr](https://img.shields.io/badge/qbrr-2E72D2?logoColor=white)](https://github.com/buroa/qbrr) | - | Reannounce & categories |
+| [![trackarr](https://img.shields.io/badge/trackarr-E6522C?logoColor=white)](https://github.com/heapoutofspace/trackarr) | - | Tracker metrics exporter |
 
 ### Web Infrastructure
 
@@ -203,7 +204,7 @@ Dalboplex is a production-quality home server infrastructure built on TrueNAS, p
 | [![Scrutiny](https://img.shields.io/badge/Scrutiny-FF6B6B?logoColor=white)](https://github.com/AnalogJ/scrutiny) | [disks.dalboplex.ch](https://disks.dalboplex.ch) | Disk health |
 | [![Speedtest Tracker](https://img.shields.io/badge/Speedtest_Tracker-00A4DC?logoColor=white)](https://github.com/henrywhitaker3/Speedtest-Tracker) | [speedtest.dalboplex.ch](https://speedtest.dalboplex.ch) | Speed monitoring |
 
-**Total Services**: 43 containers across 10 compose files
+**Total Services**: 44 containers across 10 compose files
 
 ## Network & Security
 

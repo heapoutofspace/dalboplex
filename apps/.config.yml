@@ -216,6 +216,14 @@ labels:
     template: |
       {% if port == -1 %}{% set port = domain.port %}{% endif %}
       - prometheus.address={{ container }}:{{ port }}
+      {%- if scrape_interval %}
+      - prometheus.scrape_interval={{ scrape_interval }}
+      {%- endif %}
+      {%- if scrape_timeout %}
+      - prometheus.scrape_timeout={{ scrape_timeout }}
+      {%- elif scrape_interval %}
+      - prometheus.scrape_timeout={{ scrape_interval }}
+      {%- endif %}
 
   disable-watchtower:
     template: |

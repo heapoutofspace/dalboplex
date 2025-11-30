@@ -4,7 +4,7 @@ services:
   # Torrent management and automation tool
   # https://github.com/StuffAnThings/qbit_manage
   qbit_manage:
-    image: ghcr.io/stuffanthings/qbit_manage:develop
+    image: ghcr.io/stuffanthings/qbit_manage:v4.6.5
     volumes:
       - @config
       - @media
@@ -91,3 +91,15 @@ services:
     user: 1000:1000
     environment:
       - QBITTORRENT_HOST=http://qbittorrent
+
+  # Prometheus metrics exporter for private torrent trackers
+  # https://github.com/heapoutofspace/trackarr
+  trackarr:
+    image: ghcr.io/heapoutofspace/trackarr:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - metrics:
+          port: 8000
+          scrape_interval: 1h
