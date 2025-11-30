@@ -102,4 +102,4 @@ services:
     x-features:
       - metrics:
           port: 8000
-          scrape_interval: 1h
+          scrape_interval: 15m

@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 60s
+  scrape_timeout: 60s
+  evaluation_interval: 60s
+
+
+scrape_configs:
+  - job_name: 'docker'
+    docker_sd_configs:
+      - host: http://dockerproxy:2375
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_prometheus_address]
+        regex: '.+'
+        action: keep
+
+      - source_labels: [__meta_docker_container_label_prometheus_address]
+        target_label: __address__
+
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.+)'
+        target_label: job
+        replacement: '$1'
+
+      - source_labels: [__meta_docker_container_label_prometheus_scrape_interval]
+        regex: '(.+)'
+        target_label: __scrape_interval__
+        replacement: '$1'
+
+      - source_labels: [__meta_docker_container_label_prometheus_scrape_timeout]
+        regex: '(.+)'
+        target_label: __scrape_timeout__
+        replacement: '$1'

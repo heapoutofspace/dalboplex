@@ -1,6 +1,53 @@
 version: '3.7'
 x-icon: grafana
 services:
+  # Metrics visualization and dashboarding
+  # https://grafana.com/
+  grafana:
+    image: grafana/grafana:latest
+    user: 1000:1000
+    volumes:
+      - @data:/var/lib/grafana
+    environment:
+      - GF_SERVER_ROOT_URL=https://grafana.dalboplex.ch
+      - GF_SECURITY_ADMIN_USER=simon@ceilingcat.ch
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-Auth-Request-Email
+      - GF_AUTH_PROXY_HEADER_PROPERTY=email
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      - GF_AUTH_PROXY_HEADERS=Email:X-Auth-Request-Email
+    x-features:
+      - domain:
+          subdomain: grafana
+          port: 3000
+      - homepage:
+          group: Monitoring
+          description: Metrics visualization
+          weight: 20
+      - metrics:
+
+  # Long-term storage for Prometheus metrics
+  # https://victoriametrics.com/
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    user: 1000:1000
+    command:
+      - --storageDataPath=/storage
+      - --httpListenAddr=:8428
+      - --retentionPeriod=10y
+    volumes:
+      - @data:/storage
+    x-features:
+      - domain:
+          subdomain: victoria
+          port: 8428
+      - homepage:
+          group: Monitoring
+          description: Long-term metrics storage
+          weight: 55
+      - metrics:
+
   # Metrics collection and time-series database
   # https://prometheus.io/
   prometheus:
@@ -24,6 +71,34 @@ services:
           weight: 50
       - widget:
       - metrics:
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.processes'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    devices:
+      - /dev/dri
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+      - /dev/sdg
+      - /dev/sdh
+      - /dev/sdi
+      - /dev/sdj
+      - /dev/nvme0
+      - /dev/nvme1
+      - /dev/nvme2
+      - /dev/nvme3
+    x-features:
+      - metrics:
+          port: 9100
 
   # Hard drive and SSD monitoring
   # https://github.com/AnalogJ/scrutiny
@@ -62,87 +137,6 @@ services:
           description: Disk health monitoring
           weight: 30
       - widget:
-
-  # Internet connection monitoring and testing
-  # https://docs.speedtest-tracker.dev/
-  speedtest:
-    image: lscr.io/linuxserver/speedtest-tracker:latest
-    environment:
-      - APP_KEY=$SPEEDTEST_APP_KEY
-      - DB_CONNECTION=sqlite
-      - APP_URL=https://speedtest.dalboplex.ch
-      - ASSET_URL=https://speedtest.dalboplex.ch
-      - DISPLAY_TIMEZONE=Europe/Zurich
-      - SPEEDTEST_SCHEDULE=33 */2 * * *
-      - SPEEDTEST_SERVERS=3188,50092,54457
-      - PUBLIC_DASHBOARD=true
-    volumes:
-      - @config
-    x-features:
-      - domain: speedtest
-      - homepage:
-          group: Monitoring
-          description: Internet speed monitoring
-          icon: speedtest-tracker
-          weight: 40
-      - widget:
-          version: 2
-          key: $SPEEDTEST_API_KEY
-
-  # Cross-platform system monitoring with web interface
-  # https://nicolargo.github.io/glances/
-  glances:
-    image: nicolargo/glances:latest
-    pid: host
-    environment:
-      - GLANCES_OPT=-w
-      - DOCKER_HOST=tcp://dockerproxy:2375
-    volumes:
-      - @config:/etc/glances
-      - /etc/os-release:/etc/os-release:ro
-    devices:
-      - /dev/dri
-    x-features:
-      - domain:
-          subdomain: glances
-          port: 61208
-      - homepage:
-          group: System
-          description: Resource usage
-          weight: 35
-      - widget:
-          version: 4
-          metric: cpu
-      - uptime:
-          monitor: docker
-
-  node-exporter:
-    image: quay.io/prometheus/node-exporter:latest
-    command:
-      - '--path.rootfs=/host'
-      - '--collector.processes'
-    pid: host
-    volumes:
-      - '/:/host:ro,rslave'
-    devices:
-      - /dev/dri
-      - /dev/sda
-      - /dev/sdb
-      - /dev/sdc
-      - /dev/sdd
-      - /dev/sde
-      - /dev/sdf
-      - /dev/sdg
-      - /dev/sdh
-      - /dev/sdi
-      - /dev/sdj
-      - /dev/nvme0
-      - /dev/nvme1
-      - /dev/nvme2
-      - /dev/nvme3
-    x-features:
-      - metrics:
-          port: 9100
 
   # Service uptime monitoring with status pages and alerts
   # https://github.com/louislam/uptime-kuma
@@ -184,27 +178,55 @@ services:
       - kuma.discord.notification.active=true
       - 'kuma.discord.notification.config={"type": "discord", "discordWebhookUrl": "$UPTIME_KUMA_NOTIFICATION_URL"}'
 
-  # Metrics visualization and dashboarding
-  # https://grafana.com/
-  grafana:
-    image: grafana/grafana:latest
-    user: 1000:1000
-    volumes:
-      - @data:/var/lib/grafana
+  # Cross-platform system monitoring with web interface
+  # https://nicolargo.github.io/glances/
+  glances:
+    image: nicolargo/glances:latest
+    pid: host
     environment:
-      - GF_SERVER_ROOT_URL=https://grafana.dalboplex.ch
-      - GF_SECURITY_ADMIN_USER=simon@ceilingcat.ch
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_PROXY_ENABLED=true
-      - GF_AUTH_PROXY_HEADER_NAME=X-Auth-Request-Email
-      - GF_AUTH_PROXY_HEADER_PROPERTY=email
-      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      - GF_AUTH_PROXY_HEADERS=Email:X-Auth-Request-Email
+      - GLANCES_OPT=-w
+      - DOCKER_HOST=tcp://dockerproxy:2375
+    volumes:
+      - @config:/etc/glances
+      - /etc/os-release:/etc/os-release:ro
+    devices:
+      - /dev/dri
     x-features:
       - domain:
-          subdomain: grafana
-          port: 3000
+          subdomain: glances
+          port: 61208
+      - homepage:
+          group: System
+          description: Resource usage
+          weight: 35
+      - widget:
+          version: 4
+          metric: cpu
+      - uptime:
+          monitor: docker
+
+  # Internet connection monitoring and testing
+  # https://docs.speedtest-tracker.dev/
+  speedtest:
+    image: lscr.io/linuxserver/speedtest-tracker:latest
+    environment:
+      - APP_KEY=$SPEEDTEST_APP_KEY
+      - DB_CONNECTION=sqlite
+      - APP_URL=https://speedtest.dalboplex.ch
+      - ASSET_URL=https://speedtest.dalboplex.ch
+      - DISPLAY_TIMEZONE=Europe/Zurich
+      - SPEEDTEST_SCHEDULE=33 */2 * * *
+      - SPEEDTEST_SERVERS=3188,50092,54457
+      - PUBLIC_DASHBOARD=true
+    volumes:
+      - @config
+    x-features:
+      - domain: speedtest
       - homepage:
           group: Monitoring
-          description: Metrics visualization
-          weight: 20
+          description: Internet speed monitoring
+          icon: speedtest-tracker
+          weight: 40
+      - widget:
+          version: 2
+          key: $SPEEDTEST_API_KEY
