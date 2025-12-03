@@ -57,6 +57,7 @@ services:
       - --config.file=/config/prometheus.yml
       - --storage.tsdb.path=/data
       - --storage.tsdb.retention.time=90d
+      - --query.lookback-delta=15m
       - --web.external-url=https://prometheus.dalboplex.ch
     volumes:
       - @data
@@ -72,6 +73,8 @@ services:
       - widget:
       - metrics:
 
+  # Prometheus node exporter for system metrics
+  # https://github.com/prometheus/node_exporter
   node-exporter:
     image: quay.io/prometheus/node-exporter:latest
     command:
@@ -99,6 +102,7 @@ services:
     x-features:
       - metrics:
           port: 9100
+
 
   # Hard drive and SSD monitoring
   # https://github.com/AnalogJ/scrutiny
@@ -230,3 +234,16 @@ services:
       - widget:
           version: 2
           key: $SPEEDTEST_API_KEY
+
+
+  # Prometheus metrics exporter for digitec hard drive prices
+  # https://github.com/heapoutofspace/savarr
+  savarr:
+    image: ghcr.io/heapoutofspace/savarr:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - metrics:
+          port: 8000
+          scrape_interval: 10m

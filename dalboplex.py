@@ -131,8 +131,9 @@ def show_diff(old_content: str, new_content: str, old_label: str = "installed", 
 
 def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
     """
-    Ensure directories exist with correct permissions via TrueNAS API.
-    For files, only ownership is adjusted (not permissions).
+    Ensure directories exist via TrueNAS API.
+    Sets permissions and ownership only when creating new directories.
+    Existing directories are left unchanged.
     """
     for dir_info in dirs:
         path = dir_info["path"]
@@ -219,46 +220,9 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                     console.print(f"[red]✗[/red] Failed to create {path}: {e}")
                     raise
         else:
-            # Path exists - check and fix permissions/ownership if needed
-            current_uid = stat_result.get("uid")
-            current_gid = stat_result.get("gid")
-            current_mode = oct(stat_result.get("mode", 0))[-3:]  # Get last 3 digits
-
-            needs_chown = current_uid != uid or current_gid != gid
-            # Only fix permissions on directories, not files
-            needs_chmod = not is_file and current_mode != mode
-
-            if needs_chown or needs_chmod:
-                changes = []
-                if needs_chown:
-                    changes.append(f"ownership {current_uid}:{current_gid} → {uid}:{gid}")
-                if needs_chmod:
-                    changes.append(f"mode {current_mode} → {mode}")
-
-                item_type = "file" if is_file else "directory"
-                console.print(f"[yellow]⚠[/yellow] Fixing {item_type} {path}: {', '.join(changes)}")
-
-                try:
-                    if needs_chown:
-                        client.call("filesystem.chown", {
-                            "path": path,
-                            "uid": uid,
-                            "gid": gid,
-                            "options": {"recursive": False}
-                        })
-                    if needs_chmod:
-                        client.call("filesystem.setperm", {
-                            "path": path,
-                            "mode": mode,
-                            "options": {"recursive": False, "traverse": False}
-                        })
-                    console.print(f"[green]✓[/green] Fixed {path}")
-                except Exception as e:
-                    console.print(f"[red]✗[/red] Failed to fix {path}: {e}")
-                    raise
-            else:
-                item_type = "file" if is_file else "directory"
-                console.print(f"[green]✓[/green] {path} ({item_type})")
+            # Path exists - no action needed
+            item_type = "file" if is_file else "directory"
+            console.print(f"[green]✓[/green] {path} ({item_type})")
 
 
 def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, Any]) -> tuple[str, bool]:

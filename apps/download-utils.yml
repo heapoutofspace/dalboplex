@@ -102,4 +102,19 @@ services:
     x-features:
       - metrics:
           port: 8000
-          scrape_interval: 15m
+          scrape_interval: 10m
+
+  # qBittorrent Prometheus exporter
+  # https://github.com/esanchezm/prometheus-qbittorrent-exporter
+  qbittorrent-exporter:
+    image: ghcr.io/esanchezm/prometheus-qbittorrent-exporter:latest
+    user: 1000:1000
+    environment:
+      - QBITTORRENT_HOST=qbittorrent
+      - QBITTORRENT_PORT=80
+      - QBITTORRENT_USER=admin
+      - QBITTORRENT_PASS=$QBITTORRENT_PASSWORD
+      - EXPORTER_PORT=8000
+    x-features:
+      - metrics:
+          port: 8000
