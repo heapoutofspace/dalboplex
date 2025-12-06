@@ -118,3 +118,18 @@ services:
     x-features:
       - metrics:
           port: 8000
+
+  qui:
+    image: ghcr.io/autobrr/qui:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - domain:
+          subdomain: qui
+          port: 7476
+      - homepage:
+          group: Download
+          description: Modern qbittorrent UI
+      - metrics:
+          port: 9074

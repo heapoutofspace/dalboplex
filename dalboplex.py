@@ -132,14 +132,13 @@ def show_diff(old_content: str, new_content: str, old_label: str = "installed", 
 def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
     """
     Ensure directories exist via TrueNAS API.
-    Sets permissions and ownership only when creating new directories.
+    Sets ownership only when creating new directories.
     Existing directories are left unchanged.
     """
     for dir_info in dirs:
         path = dir_info["path"]
         uid = dir_info["uid"]
         gid = dir_info["gid"]
-        mode = dir_info["mode"]
 
         # Check if path exists
         try:
@@ -174,12 +173,6 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                             "gid": gid,
                             "options": {"recursive": False}
                         })
-                        # Set permissions on parent
-                        client.call("filesystem.setperm", {
-                            "path": parent_path,
-                            "mode": mode,
-                            "options": {"recursive": False, "traverse": False}
-                        })
 
                     console.print(f"[yellow]Note:[/yellow] File {path} doesn't exist - will be created by container")
                 except Exception as e:
@@ -209,13 +202,7 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                         "options": {"recursive": False}
                     })
 
-                    # Set permissions
-                    client.call("filesystem.setperm", {
-                        "path": path,
-                        "mode": mode,
-                        "options": {"recursive": False, "traverse": False}
-                    })
-                    console.print(f"[green]✓[/green] Created {path} (uid={uid}, gid={gid}, mode={mode})")
+                    console.print(f"[green]✓[/green] Created {path} (uid={uid}, gid={gid})")
                 except Exception as e:
                     console.print(f"[red]✗[/red] Failed to create {path}: {e}")
                     raise

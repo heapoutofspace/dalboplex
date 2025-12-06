@@ -20,6 +20,7 @@ services:
     x-features:
       - domain:
           subdomain: grafana
+          group: dplx-ro
           port: 3000
       - homepage:
           group: Monitoring
@@ -59,6 +60,7 @@ services:
       - --storage.tsdb.retention.time=90d
       - --query.lookback-delta=15m
       - --web.external-url=https://prometheus.dalboplex.ch
+      - --web.enable-admin-api
     volumes:
       - @data
       - @config
@@ -234,6 +236,8 @@ services:
       - widget:
           version: 2
           key: $SPEEDTEST_API_KEY
+      - metrics:
+          metrics_path: /prometheus
 
 
   # Prometheus metrics exporter for digitec hard drive prices

@@ -216,12 +216,10 @@ labels:
     template: |
       {% if port == -1 %}{% set port = domain.port %}{% endif %}
       - prometheus.address={{ container }}:{{ port }}
-      {%- if scrape_interval %}
-      - prometheus.scrape_interval={{ scrape_interval }}
-      {%- endif %}
-      {%- if scrape_timeout %}
-      - prometheus.scrape_timeout={{ scrape_timeout }}
-      {%- elif scrape_interval %}
+      {% for key, value in kwargs.items() if key != 'port' %}
+      - prometheus.{{ key }}={{ value }}
+      {% endfor %}
+      {%- if scrape_interval and not scrape_timeout %}
       - prometheus.scrape_timeout={{ scrape_interval }}
       {%- endif %}
 
