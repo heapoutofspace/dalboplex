@@ -70,3 +70,17 @@ services:
       - POST=0 # Disallow any POST operations (effectively read-only)
     volumes:
       - @docker
+
+  truecommand:
+    image: ixsystems/truecommand:latest
+    user: 1000:1000
+    volumes:
+      - @data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    x-features:
+      - domain: truecommand
+      - homepage:
+          group: System
+          description: TrueNAS fleet management
+          weight: 100

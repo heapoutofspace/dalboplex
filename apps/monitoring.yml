@@ -97,6 +97,8 @@ services:
       - /dev/sdh
       - /dev/sdi
       - /dev/sdj
+      - /dev/sdk
+      - /dev/sdl
       - /dev/nvme0
       - /dev/nvme1
       - /dev/nvme2
@@ -127,6 +129,8 @@ services:
       - /dev/sdh
       - /dev/sdi
       - /dev/sdj
+      - /dev/sdk
+      - /dev/sdl
       - /dev/nvme0
       - /dev/nvme1
       - /dev/nvme2
