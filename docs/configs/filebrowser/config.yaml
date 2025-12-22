@@ -13,6 +13,10 @@ server:
       config:
         defaultEnabled: true
         defaultUserScope: "/"
+    - path: /mnt/games
+      config:
+        defaultEnabled: true
+        defaultUserScope: "/"
 auth:
   adminUsername: simon
   methods:

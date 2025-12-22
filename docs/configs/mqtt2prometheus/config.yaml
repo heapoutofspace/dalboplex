@@ -1,0 +1,60 @@
+# mqtt2prometheus configuration
+# https://github.com/hikhvar/mqtt2prometheus
+#
+# Configured for Shelly H&T Gen3 sensors
+# Topic structure: shellyhtg3-<name>/status/<component>
+# Example payloads:
+# - temperature:0 -> {"id":0, "tC":27.7, "tF":81.8}
+# - humidity:0 -> {"id":0, "rh":37.6}
+# - devicepower:0 -> {"id":0, "battery":{"V":0.01, "percent":0}, "external":{"present":true}}
+# - wifi -> {"sta_ip":"192.168.3.11", "status":"got ip", "ssid":"...", "rssi":-52}
+
+# MQTT broker connection
+mqtt:
+  server: tcp://mosquitto:1883
+  topic_path: +/status/+
+  client_id: mqtt2prometheus
+  qos: 0
+  # Extract device ID and room from topic: shellyhtg3-kitchen/status/...
+  # Creates labels: sensor="shellyhtg3-kitchen", room="kitchen"
+  device_id_regex: "(?P<deviceid>(?P<model>[^-]+)-(?P<room>[^/]+))/status/.*"
+
+# Prometheus cache settings
+cache:
+  timeout: 24h
+
+# JSON parsing settings
+json_parsing:
+  separator: "."
+
+# Metric definitions for Shelly sensors
+# mqtt_name refers to the JSON field name in the message
+# sensor_name_filter matches against the device ID extracted by device_id_regex
+metrics:
+  # Temperature sensor (°C)
+  - prom_name: shelly_temperature_celsius
+    mqtt_name: tC
+    help: Temperature reading from Shelly sensor in Celsius
+    type: gauge
+    sensor_name_filter: "^shelly.*"
+
+  # Humidity sensor (%)
+  - prom_name: shelly_humidity_percent
+    mqtt_name: rh
+    help: Relative humidity reading from Shelly sensor
+    type: gauge
+    sensor_name_filter: "^shelly.*"
+
+  # Battery level (%)
+  - prom_name: shelly_battery_percent
+    mqtt_name: battery.percent
+    help: Battery level from Shelly sensor
+    type: gauge
+    sensor_name_filter: "^shelly.*"
+
+  # WiFi signal strength (dBm)
+  - prom_name: shelly_wifi_rssi
+    mqtt_name: rssi
+    help: WiFi signal strength from Shelly sensor in dBm
+    type: gauge
+    sensor_name_filter: "^shelly.*"
