@@ -131,9 +131,8 @@ def show_diff(old_content: str, new_content: str, old_label: str = "installed", 
 
 def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
     """
-    Ensure directories exist via TrueNAS API.
-    Sets ownership only when creating new directories.
-    Existing directories are left unchanged.
+    Ensure directories exist with correct permissions via TrueNAS API.
+    For files, only ownership is adjusted (not permissions).
     """
     for dir_info in dirs:
         path = dir_info["path"]
@@ -207,9 +206,36 @@ def ensure_directories(client: Client, dirs: list[dict[str, Any]]):
                     console.print(f"[red]✗[/red] Failed to create {path}: {e}")
                     raise
         else:
-            # Path exists - no action needed
-            item_type = "file" if is_file else "directory"
-            console.print(f"[green]✓[/green] {path} ({item_type})")
+            # Path exists - check and fix permissions/ownership if needed
+            current_uid = stat_result.get("uid")
+            current_gid = stat_result.get("gid")
+
+            needs_chown = current_uid != uid or current_gid != gid
+            # Only fix permissions on directories, not files
+
+            if needs_chown:
+                changes = []
+                if needs_chown:
+                    changes.append(f"ownership {current_uid}:{current_gid} → {uid}:{gid}")
+
+                item_type = "file" if is_file else "directory"
+                console.print(f"[yellow]⚠[/yellow] Fixing {item_type} {path}: {', '.join(changes)}")
+
+                try:
+                    if needs_chown:
+                        client.call("filesystem.chown", {
+                            "path": path,
+                            "uid": uid,
+                            "gid": gid,
+                            "options": {"recursive": False}
+                        })
+                    console.print(f"[green]✓[/green] Fixed {path}")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to fix {path}: {e}")
+                    raise
+            else:
+                item_type = "file" if is_file else "directory"
+                console.print(f"[green]✓[/green] {path} ({item_type})")
 
 
 def parse_volume_placeholder(volume: str, service_name: str, config: dict[str, Any]) -> tuple[str, bool]:
@@ -902,7 +928,8 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
     Render the docker-compose template with boilerplate.
 
     Returns a tuple of (rendered_config, default_volume_dirs, icon_url).
-    default_volume_dirs is a list of dicts with path, uid, gid, mode for directories to create.
+    default_volume_dirs is a list of dicts with path, uid, gid for directories to create.
+    mode is included for display purposes but not used for permission setting.
     icon_url is the custom icon URL if specified via x-icon field.
     """
     # Extract icon URL if present (top-level field, not part of services)
@@ -921,7 +948,7 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
 
     # Get default volume config for directory creation
     default_volume_config = config.get("volumes", {}).get("default", {})
-    has_default_config = all(k in default_volume_config for k in ["uid", "gid", "mode"])
+    has_default_config = all(k in default_volume_config for k in ["uid", "gid"])
 
     # Track directories to create
     dirs_to_create = []
@@ -945,7 +972,6 @@ def render_compose(template: dict[str, Any], config: dict[str, Any], app_name: s
                             "path": host_path,
                             "uid": default_volume_config["uid"],
                             "gid": default_volume_config["gid"],
-                            "mode": str(default_volume_config["mode"]),
                         })
                 else:
                     processed_volumes.append(volume)
@@ -1620,7 +1646,10 @@ def _update_single_app(
 
             # Ensure directories exist with correct permissions (collected during rendering)
             if dirs_to_ensure:
+                console.print(f"[dim]Ensuring {len(dirs_to_ensure)} directories...[/dim]")
                 ensure_directories(client, dirs_to_ensure)
+            else:
+                console.print("[dim]No directories to ensure[/dim]")
 
             if not app_exists:
                 # Create new app

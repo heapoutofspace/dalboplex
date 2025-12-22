@@ -4,7 +4,6 @@ common:
       - TZ=Europe/Zurich
       - PUID=1000
       - PGID=1000
-      - UMASK=002
     networks:
       apps: null
     logging:
@@ -25,7 +24,6 @@ volumes:
     mount: /{{ folder }}
     uid: 1000
     gid: 1000
-    mode: 775
   docker:
     host: /var/run/docker.sock
     mount: /var/run/docker.sock:ro
