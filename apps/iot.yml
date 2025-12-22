@@ -1,0 +1,57 @@
+version: '3.7'
+x-icon: home-assistant
+services:
+  # Home Assistant - Open source home automation
+  # https://www.home-assistant.io/
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    user: 1000:1000
+    volumes:
+      - @config
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      lan:
+        ipv4_address: 192.168.3.3
+    x-features:
+      - domain:
+          subdomain: ha
+          port: 8123
+      - homepage:
+          group: IoT
+          name: Home Assistant
+          description: Home automation platform
+          weight: 10
+
+  # MQTT message broker for IoT devices
+  # https://mosquitto.org/
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    user: 1000:1000
+    volumes:
+      - @config:/mosquitto/config
+      - @data:/mosquitto/data
+      - @logs:/mosquitto/log
+    ports:
+      - "1883:1883"
+
+  # Prometheus exporter for MQTT messages
+  # https://github.com/heapoutofspace/mqtt_exporter
+  mqtt-exporter:
+    image: ghcr.io/heapoutofspace/mqtt_exporter:latest
+    user: 1000:1000
+    volumes:
+      - @config
+    x-features:
+      - metrics:
+          port: 9090
+
+networks:
+  lan:
+    external: true
+
+
+# docker network create -d macvlan \
+#   --subnet=192.168.0.0/16 \
+#   --ip-range=192.168.3.128/25 \
+#   --gateway=192.168.0.1 \
+#   -o parent=enp12s0 lan
